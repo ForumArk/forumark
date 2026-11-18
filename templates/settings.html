@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Settings · {{ site.title }}{% endblock %}
+{% block main %}
+<h1>Settings</h1>
+<p class="summary">Saved in this browser only.</p>
+<fieldset class="setting">
+  <legend>Theme</legend>
+  <label><input type="radio" name="theme" value="system"> Match my device</label>
+  <label><input type="radio" name="theme" value="light"> Light</label>
+  <label><input type="radio" name="theme" value="dark"> Dark</label>
+</fieldset>
+<fieldset class="setting">
+  <legend>Text size</legend>
+  <label><input type="radio" name="text" value="normal"> Normal</label>
+  <label><input type="radio" name="text" value="large"> Large</label>
+</fieldset>
+<script>
+(function () {
+  function get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }
+  function set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  var root = document.documentElement;
+  document.querySelector('input[name=theme][value="' + get('fa-theme', 'system') + '"]').checked = true;
+  document.querySelector('input[name=text][value="' + get('fa-text', 'normal') + '"]').checked = true;
+  document.querySelectorAll('input[name=theme]').forEach(function (i) {
+    i.addEventListener('change', function () {
+      set('fa-theme', i.value);
+      if (i.value === 'system') delete root.dataset.theme; else root.dataset.theme = i.value;
+    });
+  });
+  document.querySelectorAll('input[name=text]').forEach(function (i) {
+    i.addEventListener('change', function () {
+      set('fa-text', i.value);
+      if (i.value === 'large') root.dataset.text = 'large'; else delete root.dataset.text;
+    });
+  });
+})();
+</script>
+<noscript><p>Settings need JavaScript. Without it, the site follows your device's light or dark mode.</p></noscript>
+{% endblock %}

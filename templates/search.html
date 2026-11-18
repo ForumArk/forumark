@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Search · {{ site.title }}{% endblock %}
+{% block main %}
+<h1>Search</h1>
+<link href="{{ site.base }}pagefind/pagefind-ui.css" rel="stylesheet">
+<script src="{{ site.base }}pagefind/pagefind-ui.js"></script>
+<div id="search" data-base="{{ site.base }}"></div>
+<script>
+window.addEventListener('DOMContentLoaded', () => {
+  // The base path is read from an attribute: the template engine escapes '/' inside scripts.
+  const base = document.getElementById('search').dataset.base;
+  new PagefindUI({ element: "#search", showSubResults: true, showImages: false,
+    bundlePath: base + "pagefind/", baseUrl: base });
+  const q = new URLSearchParams(location.search).get('q');
+  if (q) { const i = document.querySelector('#search input'); if (i) { i.value = q; i.dispatchEvent(new Event('input')); } }
+});
+</script>
+<noscript><p>Search needs JavaScript. You can still browse every board from the front page.</p></noscript>
+{% endblock %}

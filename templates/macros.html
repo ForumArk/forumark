@@ -1,0 +1,3 @@
+{% macro pager(p) %}{% if p.total > 1 %}
+<nav class="pager">{% for n in p.links %}{% if n.gap %}<span class="gap">…</span>{% elif n.current %}<span class="current">{{ n.num }}</span>{% else %}<a href="{{ n.href }}">{{ n.num }}</a>{% endif %}{% endfor %}</nav>
+{% endif %}{% endmacro %}

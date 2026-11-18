@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block main %}
+<h1>{{ site.title }}</h1>
+<p class="summary">{{ stats.threads }} threads · {{ stats.posts }} posts · {{ stats.users }} members</p>
+{% for cat in categories %}
+<section class="category">
+  <h2>{{ cat.title }}</h2>
+  <ul class="forum-list">
+  {% for f in cat.forums %}<li><a href="{{ f.href }}">{{ f.title }}</a> <span class="count">{{ f.threads }} thread{% if f.threads != 1 %}s{% endif %}</span></li>{% endfor %}
+  </ul>
+</section>
+{% endfor %}
+{% endblock %}

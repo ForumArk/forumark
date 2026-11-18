@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ site.title }}{% endblock %}</title>
+<script>
+  // Apply saved settings before the page paints, so there is no flash of the wrong theme.
+  try {
+    var t = localStorage.getItem('fa-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    var s = localStorage.getItem('fa-text'); if (s === 'large') document.documentElement.dataset.text = s;
+  } catch (e) {}
+</script>
+<link rel="stylesheet" href="{{ site.base }}assets/style.css">
+<link rel="icon" href="{{ site.base }}assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<header class="site-header">
+  <div class="wrap header-row">
+    <a class="site-name" href="{{ site.base }}"><svg class="logo-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 19h24l-3 7H7z" fill="currentColor"/><path d="M16 4v13M16 5l8 10h-8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/></svg>{{ site.title }}</a>
+    <nav class="header-nav">
+      <form class="header-search" action="{{ site.base }}search/" role="search">
+        <input type="search" name="q" placeholder="Search the archive" aria-label="Search the archive">
+      </form>
+      <a href="{{ site.base }}search/" class="search-link-mobile">Search</a>
+      <a href="{{ site.base }}settings/">Settings</a>
+    </nav>
+  </div>
+</header>
+<div class="wrap">
+{% if crumbs %}<nav class="crumbs" aria-label="Breadcrumb"><a href="{{ site.base }}">Home</a>{% for c in crumbs %} <span aria-hidden="true">›</span> <a href="{{ c.href }}">{{ c.title }}</a>{% endfor %}</nav>{% endif %}
+<main>
+{% block main %}{% endblock %}
+</main>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <p>{{ site.notice }} Original site: {{ site.origin }}</p>
+    <p>Want your posts removed? {% if site.removal_url %}See <a href="{{ site.removal_url }}">removal requests</a> or email{% else %}Email{% endif %} <a href="mailto:{{ site.contact }}">{{ site.contact }}</a>. · Preserved with <a href="{{ site.project_url }}">Forum Ark</a>{% if site.privacy_url %} · <a href="{{ site.privacy_url }}">Privacy</a>{% endif %}{% if site.about_url %} · <a href="{{ site.about_url }}">About</a>{% endif %}</p>
+  </div>
+</footer>
+</body>
+</html>

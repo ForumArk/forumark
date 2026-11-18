@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}{{ forum.title }}{% if pager.current > 1 %} (page {{ pager.current }}){% endif %} · {{ site.title }}{% endblock %}
+{% block main %}
+<h1>{{ forum.title }}</h1>
+{% if subforums %}<ul class="forum-list">{% for f in subforums %}<li><a href="{{ f.href }}">{{ f.title }}</a> <span class="count">{{ f.threads }} thread{% if f.threads != 1 %}s{% endif %}</span></li>{% endfor %}</ul>{% endif %}
+{{ m.pager(pager) }}
+<table class="thread-list">
+<thead><tr><th>Thread</th><th>Started by</th><th>Posts</th><th>Last post</th></tr></thead>
+<tbody>
+{% for t in threads %}<tr><td><a href="{{ t.href }}">{{ t.title }}</a></td><td>{{ t.author }}</td><td>{{ t.posts }}</td><td>{{ t.last }}</td></tr>{% endfor %}
+</tbody>
+</table>
+{{ m.pager(pager) }}
+{% endblock %}

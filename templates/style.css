@@ -1,0 +1,98 @@
+/* Forum Ark: style A, "Classic".
+   Light grey page, white panels, a blue accent. Plain system fonts. */
+:root {
+  --bg: #f3f4f6; --panel: #ffffff; --panel-2: #f8f9fb; --text: #1f2328; --muted: #656d76;
+  --line: #d8dee4; --accent: #1f5fbf; --accent-soft: #e8f0fc; --header-bg: #ffffff;
+  --radius: 6px; --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; --size: 16px;
+}
+:root[data-theme="dark"] {
+  --bg: #111316; --panel: #1a1d21; --panel-2: #20242a; --text: #e6e8eb; --muted: #9aa3ad;
+  --line: #2e343b; --accent: #6ea8fe; --accent-soft: #1d2a3d; --header-bg: #1a1d21;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111316; --panel: #1a1d21; --panel-2: #20242a; --text: #e6e8eb; --muted: #9aa3ad;
+    --line: #2e343b; --accent: #6ea8fe; --accent-soft: #1d2a3d; --header-bg: #1a1d21;
+  }
+}
+:root[data-text="large"] { --size: 19px; }
+
+* { box-sizing: border-box; }
+html { color-scheme: light dark; }
+body { margin: 0; font: var(--size)/1.6 var(--font); color: var(--text); background: var(--bg); }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+h1 { font-size: 1.6rem; line-height: 1.25; margin: .5rem 0 1rem; }
+h2 { font-size: 1.1rem; margin: 0; }
+.wrap { max-width: 64rem; margin: 0 auto; padding: 0 1rem; }
+
+/* Header */
+.site-header { background: var(--header-bg); border-bottom: 1px solid var(--line); }
+.header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 3.5rem; }
+.site-name { display: inline-flex; align-items: center; gap: .5rem; font-weight: 700; color: var(--text); font-size: 1.05rem; }
+.site-name:hover { text-decoration: none; }
+.logo-icon { width: 1.5rem; height: 1.5rem; flex: none; color: var(--accent); }
+.header-nav { display: flex; align-items: center; gap: 1rem; font-size: .95rem; }
+.header-search input { font: inherit; padding: .35rem .6rem; width: 15rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); color: var(--text); }
+.search-link-mobile { display: none; }
+.crumbs { margin: 1rem 0 .25rem; font-size: .9rem; color: var(--muted); }
+main { padding-bottom: 2rem; }
+.summary, .count, .date { color: var(--muted); font-size: .9rem; }
+
+/* Panels */
+.category, .post, .thread-list, .forum-list, .setting, .missing {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.category { margin: 1rem 0; overflow: hidden; }
+.category h2 { padding: .65rem 1rem; background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.forum-list { list-style: none; margin: 0; padding: 0; }
+.category .forum-list { border: 0; border-radius: 0; }
+.forum-list li { display: flex; justify-content: space-between; gap: 1rem; padding: .7rem 1rem; border-top: 1px solid var(--line); }
+.forum-list li:first-child { border-top: 0; }
+
+.thread-list { width: 100%; border-collapse: separate; border-spacing: 0; overflow: hidden; }
+.thread-list th { background: var(--panel-2); font-size: .85rem; color: var(--muted); font-weight: 600; }
+.thread-list td, .thread-list th { padding: .6rem 1rem; text-align: left; border-top: 1px solid var(--line); }
+.thread-list tr:first-child th { border-top: 0; }
+.thread-list td:nth-child(3), .thread-list th:nth-child(3) { text-align: right; }
+
+/* Posts: author column on wide screens, compact header on phones */
+.post { display: grid; grid-template-columns: 11rem 1fr; margin: 1rem 0; overflow: hidden; }
+.post-author { padding: 1rem; background: var(--panel-2); border-right: 1px solid var(--line); text-align: center; display: flex; flex-direction: column; align-items: center; gap: .5rem; }
+.avatar { display: grid; place-items: center; width: 3.5rem; height: 3.5rem; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 1.4rem; }
+.author { font-weight: 600; overflow-wrap: anywhere; }
+.post-main { min-width: 0; }
+.post-meta { padding: .5rem 1rem; border-bottom: 1px solid var(--line); }
+.post-body { padding: 1rem; overflow-wrap: anywhere; }
+.post-body img { max-width: 100%; height: auto; }
+.post-body blockquote, .post-body .bbCodeBlock { margin: .75rem 0; padding: .6rem .9rem; background: var(--panel-2); border-left: 3px solid var(--accent); border-radius: 0 var(--radius) var(--radius) 0; }
+.post-body pre, .post-body code { font-family: ui-monospace, Consolas, monospace; font-size: .9em; }
+.post-body pre { overflow-x: auto; padding: .75rem; background: var(--panel-2); border-radius: var(--radius); }
+.attachments { list-style: none; margin: 0; padding: .6rem 1rem; border-top: 1px solid var(--line); font-size: .9rem; }
+
+.pager { margin: 1rem 0; display: flex; gap: .35rem; flex-wrap: wrap; }
+.pager a, .pager span { min-width: 2.2rem; text-align: center; padding: .25rem .55rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.pager .current { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.pager .gap { border: 0; background: none; }
+.missing { padding: 1rem; border-style: dashed; }
+.source { font-size: .85rem; color: var(--muted); overflow-wrap: anywhere; }
+
+.setting { margin: 1rem 0; padding: .75rem 1rem 1rem; }
+.setting legend { font-weight: 700; padding: 0 .25rem; }
+.setting label { display: block; padding: .35rem 0; cursor: pointer; }
+
+.site-footer { border-top: 1px solid var(--line); background: var(--header-bg); color: var(--muted); font-size: .85rem; padding: 1rem 0; }
+.site-footer p { margin: .3rem 0; }
+
+@media (max-width: 44rem) {
+  .header-search { display: none; } .search-link-mobile { display: inline; }
+  .post { grid-template-columns: 1fr; }
+  .post-author { flex-direction: row; text-align: left; padding: .6rem 1rem; border-right: 0; border-bottom: 1px solid var(--line); }
+  .avatar { width: 2rem; height: 2rem; font-size: 1rem; }
+  .post-meta { position: absolute; right: 0; top: 0; border: 0; } /* date moves into the author row */
+  .post { position: relative; }
+  .post-meta { padding: .85rem 1rem; }
+  .thread-list th:nth-child(2), .thread-list td:nth-child(2), .thread-list th:nth-child(4), .thread-list td:nth-child(4) { display: none; }
+}
+
+/* XenForo quote chrome kept in archived posts: the expand toggle does nothing here. */
+.post-body .bbCodeBlock-expandLink, .post-body .bbCodeBlock-shrinkLink { display: none; }

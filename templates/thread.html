@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}{{ thread.title }}{% if pager.current > 1 %} (page {{ pager.current }}){% endif %} · {{ site.title }}{% endblock %}
+{% block main %}
+<article{% if not missing %} data-pagefind-body{% endif %}>
+<h1 data-pagefind-meta="title">{{ thread.title }}</h1>
+<span hidden data-pagefind-filter="forum">{{ thread.forum }}</span>
+{{ m.pager(pager) }}
+{% if missing %}
+<p class="missing" data-pagefind-ignore>This page of the thread was not preserved. <a href="{{ missing }}">Try the Wayback Machine</a>.</p>
+{% endif %}
+{% for p in posts %}
+<section class="post" id="post-{{ p.id }}">
+  <aside class="post-author" data-pagefind-ignore>
+    <span class="avatar" aria-hidden="true">{{ p.author[:1]|upper }}</span>
+    <span class="author">{% if p.author_href %}<a href="{{ p.author_href }}">{{ p.author }}</a>{% else %}{{ p.author }}{% endif %}</span>
+  </aside>
+  <div class="post-main">
+    <header class="post-meta" data-pagefind-ignore>
+      <a class="date" href="#post-{{ p.id }}">{{ p.date }}</a>
+    </header>
+    <div class="post-body">{{ p.body|safe }}</div>
+    {% if p.attachments %}<ul class="attachments" data-pagefind-ignore>{% for a in p.attachments %}<li><a href="{{ a.href }}" rel="nofollow">📎 {{ a.filename }}</a></li>{% endfor %}</ul>{% endif %}
+  </div>
+</section>
+{% endfor %}
+{{ m.pager(pager) }}
+<p class="source" data-pagefind-ignore>Original thread: <a href="{{ thread.original }}" rel="nofollow">{{ thread.original }}</a></p>
+</article>
+{% endblock %}
