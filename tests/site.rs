@@ -27,6 +27,7 @@ fn builds_site_with_local_links_and_missing_pages() {
         notice: "notice".into(),
         threads_per_page: 50,
         skip_search: true,
+        search_chunk: 12000,
     };
     let r = build(&store, &opts).unwrap();
     assert_eq!(r.thread_pages, 7); // 3 pages + 4 pages

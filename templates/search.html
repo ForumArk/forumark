@@ -4,13 +4,17 @@
 <h1>Search</h1>
 <link href="{{ site.base }}pagefind/pagefind-ui.css" rel="stylesheet">
 <script src="{{ site.base }}pagefind/pagefind-ui.js"></script>
-<div id="search" data-base="{{ site.base }}"></div>
+<div id="search" data-base="{{ site.base }}" data-extra="{{ extra_bundles }}"></div>
 <script>
 window.addEventListener('DOMContentLoaded', () => {
   // The base path is read from an attribute: the template engine escapes '/' inside scripts.
-  const base = document.getElementById('search').dataset.base;
+  const box = document.getElementById('search');
+  const base = box.dataset.base;
+  // Big archives are indexed in parts (pagefind-1/, pagefind-2/, ...): search them all.
+  const extra = (box.dataset.extra || '').split(' ').filter(Boolean)
+    .map(p => ({ bundlePath: base + p, baseUrl: base }));
   new PagefindUI({ element: "#search", showSubResults: true, showImages: false,
-    bundlePath: base + "pagefind/", baseUrl: base });
+    bundlePath: base + "pagefind/", baseUrl: base, mergeIndex: extra });
   const q = new URLSearchParams(location.search).get('q');
   if (q) { const i = document.querySelector('#search input'); if (i) { i.value = q; i.dispatchEvent(new Event('input')); } }
 });

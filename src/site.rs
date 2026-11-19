@@ -25,7 +25,7 @@ fn v<T: Serialize>(x: T) -> Value {
 use rusqlite::{Connection, params};
 use serde::Serialize;
 
-use crate::sanitize::{LinkContext, clean_post_html, local_href};
+use crate::sanitize::{KnownPages, LinkContext, clean_post_html, local_href};
 use crate::store::Store;
 
 pub struct BuildOptions {
@@ -45,6 +45,10 @@ pub struct BuildOptions {
     pub threads_per_page: usize,
     /// Skip building the search index (faster, for tests and previews).
     pub skip_search: bool,
+    /// Thread pages per search index part. Pagefind keeps a whole index in memory
+    /// while building it (about 270 KB per RPG Maker thread page), so big forums
+    /// are indexed in parts that the search page merges again.
+    pub search_chunk: usize,
 }
 
 #[derive(Debug, Default)]
@@ -487,11 +491,32 @@ pub fn build(store: &Store, opts: &BuildOptions) -> Result<BuildReport> {
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
 
+    // Everything we will build a page for, so links inside posts can tell
+    // archived pages from ones that only the Wayback Machine might have.
+    let mut known = KnownPages::default();
+    for row in conn
+        .prepare(
+            "SELECT t.id, MAX(t.total_pages, MAX(p.page)) FROM threads t JOIN posts p ON p.thread_id = t.id GROUP BY t.id",
+        )?
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?
+    {
+        let (id, pages) = row?;
+        known.threads.insert(id, pages.max(1) as u32);
+    }
+    known.forums = forums.values().map(|f| (f.id, f.route())).collect();
+    for row in conn.prepare("SELECT id FROM users")?.query_map([], |r| r.get::<_, i64>(0))? {
+        known.members.insert(row?);
+    }
+
     let mut b = Builder {
         conn,
         opts,
         env: env()?,
-        links: LinkContext { origin: opts.origin.trim_end_matches('/').to_string(), base: opts.base.clone() },
+        links: LinkContext {
+            origin: opts.origin.trim_end_matches('/').to_string(),
+            base: opts.base.clone(),
+            known: Some(std::sync::Arc::new(known)),
+        },
         forums,
         thread_counts,
         report: BuildReport::default(),
@@ -501,7 +526,12 @@ pub fn build(store: &Store, opts: &BuildOptions) -> Result<BuildReport> {
     b.build_forums()?;
     b.build_threads()?;
     b.build_members()?;
-    let ctx = context! { site => v(b.site()), crumbs => v(Vec::<Crumb>::new()) };
+    // Search index parts: `pagefind/` plus `pagefind-1/`, `pagefind-2/`, ... for big archives.
+    let search_files = if opts.skip_search { Vec::new() } else { thread_page_files(&opts.out_dir)? };
+    let chunk = opts.search_chunk.max(1);
+    let parts = search_files.len().div_ceil(chunk).max(1);
+    let extra_bundles: Vec<String> = (1..parts).map(|i| format!("{}/", bundle_dir(i))).collect();
+    let ctx = context! { site => v(b.site()), crumbs => v(Vec::<Crumb>::new()), extra_bundles => v(extra_bundles.join(" ")) };
     b.render("search.html", "search", ctx)?;
     let ctx = context! { site => v(b.site()), crumbs => v(Vec::<Crumb>::new()) };
     b.render("settings.html", "settings", ctx)?;
@@ -512,25 +542,68 @@ pub fn build(store: &Store, opts: &BuildOptions) -> Result<BuildReport> {
     fs::write(assets.join("favicon.svg"), include_str!("../templates/favicon.svg"))?;
 
     if !opts.skip_search {
-        b.report.search_pages_indexed = build_search_index(&opts.out_dir)?;
+        b.report.search_pages_indexed = build_search_index(&opts.out_dir, &search_files, chunk)?;
     }
     Ok(b.report)
 }
 
-/// Index the generated thread pages with Pagefind and write `out/pagefind/`.
-fn build_search_index(out: &Path) -> Result<usize> {
+fn bundle_dir(part: usize) -> String {
+    if part == 0 { "pagefind".to_string() } else { format!("pagefind-{part}") }
+}
+
+/// Every generated thread page (`threads/**/index.html`), in a stable order.
+fn thread_page_files(out: &Path) -> Result<Vec<PathBuf>> {
+    fn walk(dir: &Path, found: &mut Vec<PathBuf>) -> Result<()> {
+        if !dir.is_dir() {
+            return Ok(());
+        }
+        for entry in fs::read_dir(dir)? {
+            let p = entry?.path();
+            if p.is_dir() {
+                walk(&p, found)?;
+            } else if p.file_name().is_some_and(|n| n == "index.html") {
+                found.push(p);
+            }
+        }
+        Ok(())
+    }
+    let mut found = Vec::new();
+    walk(&out.join("threads"), &mut found)?;
+    found.sort();
+    Ok(found)
+}
+
+/// Index thread pages with Pagefind, `chunk` pages per index part, one part at a
+/// time so memory is released in between. Returns the number of pages added.
+fn build_search_index(out: &Path, files: &[PathBuf], chunk: usize) -> Result<usize> {
     use pagefind::api::PagefindIndex;
     use pagefind::options::PagefindServiceConfig;
 
+    // Parts from an earlier, bigger build would otherwise linger and be merged.
+    for entry in fs::read_dir(out)? {
+        let p = entry?.path();
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if p.is_dir() && (name == "pagefind" || name.starts_with("pagefind-")) {
+            fs::remove_dir_all(&p)?;
+        }
+    }
+
     let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        let config = PagefindServiceConfig::builder().force_language("en".to_string()).build();
-        let mut index = PagefindIndex::new(Some(config))?;
-        let site = out.to_string_lossy().to_string();
-        let count = index.add_directory(site, Some("threads/**/*.html".into())).await?;
-        index.write_files(Some(out.join("pagefind").to_string_lossy().to_string())).await?;
-        Ok(count)
-    })
+    let mut total = 0;
+    for (part, pages) in files.chunks(chunk.max(1)).enumerate() {
+        total += rt.block_on(async {
+            let config = PagefindServiceConfig::builder().force_language("en".to_string()).build();
+            let mut index = PagefindIndex::new(Some(config))?;
+            for file in pages {
+                let rel = file.strip_prefix(out)?.parent().unwrap_or(Path::new(""));
+                let url = format!("/{}/", rel.to_string_lossy().replace('\\', "/"));
+                index.add_html_file(None, Some(url), fs::read_to_string(file)?).await?;
+            }
+            index.write_files(Some(out.join(bundle_dir(part)).to_string_lossy().to_string())).await?;
+            anyhow::Ok(pages.len())
+        })?;
+    }
+    Ok(total)
 }
 
 #[cfg(test)]

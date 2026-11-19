@@ -1040,7 +1040,7 @@ dependencies = [
 
 [[package]]
 name = "forumark"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -1055,6 +1055,7 @@ dependencies = [
  "serde",
  "tempfile",
  "tokio",
+ "url",
 ]
 
 [[package]]

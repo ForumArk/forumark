@@ -12,6 +12,7 @@ Live example: the RPG Maker Forums archive at [thecodelair.com](https://thecodel
 
 - Every thread, page by page, with authors, dates and posts, plus forum listings and member pages.
 - Full-text search that runs in the browser ([Pagefind](https://pagefind.app)), with no search server needed.
+- Embedded videos and posts (YouTube, Imgur, X/Twitter, Pastebin, …) become links to the original, and old smilies become emoji.
 - Clean, readable pages with light/dark mode and a larger-text setting, and a layout that works on phones.
 - Stable links: `threads/<id>/page-N/`. Old forum links inside posts are rewritten to point inside the archive.
 - Pages that were never captured still exist, with a "not preserved" note and a link to the Wayback Machine, so links don't break.
@@ -83,6 +84,7 @@ When the same page was saved more than once, **the newest copy wins**.
 | `--removal-url`, `--privacy-url`, `--about-url` | Links to your own policy pages, shown in the footer. |
 | `--notice TEXT` | Footer notice (default: "unofficial, read-only archive"). |
 | `--no-search` | Skip the search index (faster test builds). |
+| `--search-chunk N` | Thread pages per search index part (default 12000). Big forums are indexed in parts so building stays within a few GB of memory; lower it if your computer runs out of memory. |
 
 Run `forumark --help` or `forumark <command> --help` for everything else.
 

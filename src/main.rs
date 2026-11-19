@@ -67,6 +67,9 @@ enum Cmd {
         /// Skip the search index (faster previews).
         #[arg(long)]
         no_search: bool,
+        /// Thread pages per search index part (lower = less memory while building).
+        #[arg(long, default_value_t = 12000)]
+        search_chunk: usize,
     },
     /// Import from the Internet Archive's Wayback Machine.
     #[command(subcommand)]
@@ -144,7 +147,7 @@ fn main() -> Result<()> {
             }
             println!("imported {threads} thread page(s), {forums} forum page(s); skipped {skipped}");
         }
-        Cmd::Build { out, origin, title, base, contact, removal_url, privacy_url, about_url, notice, threads_per_page, no_search } => {
+        Cmd::Build { out, origin, title, base, contact, removal_url, privacy_url, about_url, notice, threads_per_page, no_search, search_chunk } => {
             let store = Store::open(&cli.db)?;
             let opts = forumark::site::BuildOptions {
                 out_dir: out.clone(),
@@ -158,6 +161,7 @@ fn main() -> Result<()> {
                 notice,
                 threads_per_page,
                 skip_search: no_search,
+                search_chunk,
             };
             let r = forumark::site::build(&store, &opts)?;
             println!(

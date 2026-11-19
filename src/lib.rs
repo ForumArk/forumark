@@ -1,10 +1,12 @@
 //! Forum Ark: turn forum pages from any source into a permanent, searchable static site.
 
+pub mod embeds;
 pub mod model;
 pub mod parse;
 pub mod sanitize;
 pub mod site;
 pub mod store;
+pub mod tidy;
 pub mod urls;
 pub mod wayback;
 

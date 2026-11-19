@@ -7,7 +7,11 @@
 //!   which keeps serving them after the forum is gone
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use crate::embeds::embeds_to_links;
+use crate::tidy::{smilies_to_emoji, staff_notes};
 
 use crate::urls::{id_after, normalize_path, page_number, strip_wayback};
 
@@ -22,6 +26,20 @@ pub struct LinkContext {
     pub origin: String,
     /// Prefix the archive is served under, e.g. `/` or `/rpgmaker/`.
     pub base: String,
+    /// Pages that exist in the built archive. When set, links to anything else
+    /// (a thread the Wayback Machine never saved, a deleted member, ...) go to
+    /// the Wayback Machine instead of a missing archive page.
+    pub known: Option<Arc<KnownPages>>,
+}
+
+/// What the site builder generates pages for.
+#[derive(Debug, Clone, Default)]
+pub struct KnownPages {
+    /// Thread id -> number of pages built.
+    pub threads: HashMap<i64, u32>,
+    /// Forum or category id -> its route (`forums` or `categories`).
+    pub forums: HashMap<i64, &'static str>,
+    pub members: HashSet<i64>,
 }
 
 impl LinkContext {
@@ -43,11 +61,32 @@ impl LinkContext {
     /// links keep working even when a thread was renamed and its slug changed.
     /// Post permalinks (`/threads/x.1/post-9`) go to the thread's first page.
     pub fn local(&self, path: &str) -> Option<String> {
-        for route in ["threads", "forums", "categories", "members"] {
-            if let Some(id) = id_after(path, route) {
-                let page = page_number(path);
-                return Some(local_href(&self.base, route, id, page));
+        let known = self.known.as_deref();
+        if let Some(id) = id_after(path, "threads") {
+            let page = page_number(path);
+            if let Some(k) = known {
+                match k.threads.get(&id) {
+                    Some(&pages) if page <= pages => {}
+                    _ => return None,
+                }
             }
+            return Some(local_href(&self.base, "threads", id, page));
+        }
+        for route in ["forums", "categories"] {
+            if let Some(id) = id_after(path, route) {
+                // Listing pages are numbered differently in the archive, so always open page 1.
+                let route = match known {
+                    Some(k) => *k.forums.get(&id)?,
+                    None => route,
+                };
+                return Some(local_href(&self.base, route, id, 1));
+            }
+        }
+        if let Some(id) = id_after(path, "members") {
+            if known.is_some_and(|k| !k.members.contains(&id)) {
+                return None;
+            }
+            return Some(local_href(&self.base, "members", id, 1));
         }
         None
     }
@@ -109,7 +148,10 @@ pub fn clean_post_html(html: &str, ctx: &LinkContext) -> String {
             _ => Some(Cow::Borrowed(value)),
         });
     // Lazy-load images: thread pages can carry dozens of them.
-    b.clean(html).to_string().replace("<img ", "<img loading=\"lazy\" ")
+    let html = embeds_to_links(html);
+    let html = smilies_to_emoji(&html);
+    let html = staff_notes(&html);
+    b.clean(&html).to_string().replace("<img ", "<img loading=\"lazy\" ")
 }
 
 #[cfg(test)]
@@ -117,7 +159,32 @@ mod tests {
     use super::*;
 
     fn ctx() -> LinkContext {
-        LinkContext { origin: "https://forums.example.com".into(), base: "/rm/".into() }
+        LinkContext { origin: "https://forums.example.com".into(), base: "/rm/".into(), known: None }
+    }
+
+    #[test]
+    fn unknown_pages_go_to_wayback() {
+        let mut k = KnownPages::default();
+        k.threads.insert(5, 2);
+        k.forums.insert(9, "categories");
+        k.members.insert(7);
+        let c = LinkContext { known: Some(Arc::new(k)), ..ctx() };
+        assert_eq!(c.rewrite("/threads/a.5/page-2", false), "/rm/threads/5/page-2/");
+        assert_eq!(
+            c.rewrite("/threads/a.5/page-3", false),
+            "https://web.archive.org/web/2/https://forums.example.com/threads/a.5/page-3"
+        );
+        assert_eq!(c.rewrite("/threads/b.6/", false), "https://web.archive.org/web/2/https://forums.example.com/threads/b.6/");
+        assert_eq!(c.rewrite("/forums/x.9/page-4", false), "/rm/categories/9/");
+        assert_eq!(c.rewrite("/members/bob.7/", false), "/rm/members/7/");
+        assert_eq!(c.rewrite("/members/gone.8/", false), "https://web.archive.org/web/2/https://forums.example.com/members/gone.8/");
+    }
+
+    #[test]
+    fn youtube_embed_survives_cleaning() {
+        let html = r#"<span data-s9e-mediaembed="youtube"><span><span data-s9e-mediaembed-iframe="[&quot;src&quot;,&quot;https:\/\/www.youtube.com\/embed\/abc&quot;]"></span></span></span>"#;
+        let out = clean_post_html(html, &ctx());
+        assert!(out.contains(r#"<p class="embed-link"><a href="https://www.youtube.com/watch?v=abc" rel="nofollow noopener">▶ YouTube video</a></p>"#), "{out}");
     }
 
     #[test]
