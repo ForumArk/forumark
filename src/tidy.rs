@@ -2,7 +2,7 @@
 //!
 //! * XenForo "sprite" smilies are a blank 1×1 image plus CSS the archive doesn't
 //!   have, so they would show as broken images. They become emoji (or their code).
-//! * phpBB smilies point into the board's own image folder; they become emoji too.
+//! * phpBB and SMF smilies point into the board's own image folder; they become emoji too.
 //! * RPG Maker Forums staff typed tags such as `[move]Forum[/move]` by hand. The
 //!   forum showed them as raw text; here they become small labelled notes.
 
@@ -10,7 +10,7 @@ use std::borrow::Cow;
 
 /// Replace sprite smilies with emoji. Smilies with a real image URL are left alone.
 pub fn smilies_to_emoji(html: &str) -> Cow<'_, str> {
-    if !html.contains("smilie") && !html.contains("/smiles/") {
+    if !html.contains("smilie") && !html.contains("/smiles/") && !html.contains("smiley") && !html.contains("Smileys/") {
         return Cow::Borrowed(html);
     }
     let mut out = String::with_capacity(html.len());
@@ -50,7 +50,9 @@ fn phpbb_smilie(tag: &str) -> Option<String> {
     let src = attr(tag, "src")?;
     // phpBB 3 marks them with class="smilies"; phpBB 2 uses `images/smiles/` next to
     // the board's scripts. (XenForo's own smilie images live elsewhere and stay.)
-    let is_smilie = tag.contains("class=\"smilies\"") || src.contains("images/smilies/") || src.contains("images/smiles/");
+    // SMF uses class="smiley" and a `Smileys/<set>/` folder.
+    let is_smilie = tag.contains("class=\"smilies\"") || src.contains("images/smilies/") || src.contains("images/smiles/")
+        || tag.contains("class=\"smiley\"") || src.contains("/Smileys/");
     if !is_smilie {
         return None;
     }
@@ -58,7 +60,7 @@ fn phpbb_smilie(tag: &str) -> Option<String> {
     Some(file.rsplit_once('.').map_or(file, |x| x.0).to_ascii_lowercase())
 }
 
-/// phpBB's standard smilie set (phpBB 2 and 3), by image name.
+/// phpBB's and SMF's standard smilie sets, by image name.
 fn phpbb_emoji(stem: &str) -> Option<&'static str> {
     let s = stem.trim_start_matches("icon_").trim_start_matches("e_");
     Some(match s {
@@ -85,6 +87,19 @@ fn phpbb_emoji(stem: &str) -> Option<&'static str> {
         "mrgreen" => "😁",
         "geek" | "ugeek" => "🤓",
         "thumbup" | "thumbsup" => "👍",
+        // SMF's default set
+        "smiley" => "🙂",
+        "cheesy" => "😃",
+        "shocked" => "😮",
+        "huh" => "🤨",
+        "embarassed" => "😳",
+        "lipsrsealed" => "🤐",
+        "undecided" => "😕",
+        "kiss" => "😘",
+        "angel" => "😇",
+        "police" => "👮",
+        "azn" => "😊",
+        "afro" => "😎",
         "thumbdown" | "thumbsdown" => "👎",
         _ => return None,
     })
@@ -189,6 +204,8 @@ mod tests {
         let h = r#"hi <img src="images/smiles/icon_wink.gif" alt="Wink" border="0" /> and <img class="smilies" src="./images/smilies/icon_e_biggrin.gif" alt=":D" title="Very Happy">"#;
         let out = smilies_to_emoji(h);
         assert!(out.contains("😉") && out.contains("😀") && !out.contains("<img"), "{out}");
+        let smf = r#"<img src="https://f.example/Smileys/default/cheesy.gif" alt="&nbsp;:D" title="Cheesy" class="smiley" />"#;
+        assert!(smilies_to_emoji(smf).contains("😃"));
         let other = r#"<img src="https://i.imgur.com/smiles/x.png"> <img class="smilie" alt=":x:" src="/data/attachments/smilies/x.png">"#;
         assert!(smilies_to_emoji(other).contains("<img"));
     }

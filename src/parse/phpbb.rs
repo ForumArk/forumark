@@ -312,7 +312,7 @@ fn attachments(el: ElementRef) -> Vec<Attachment> {
     out
 }
 
-/// phpBB dates are free-form (each board picks its format) in board-local time.
+/// Forum dates (phpBB, SMF) are free-form (each board picks its format) in board-local time.
 /// Recognise the common English ones; store them without a timezone.
 pub fn parse_date(s: &str) -> Option<String> {
     let s = s.replace('\u{a0}', " ");
@@ -320,6 +320,15 @@ pub fn parse_date(s: &str) -> Option<String> {
     let s = s.trim_matches(|c: char| c == ',' || c == '-' || c.is_whitespace());
     const FORMATS: &[&str] = &[
         "%a %b %d, %Y %I:%M %p",
+        // SMF defaults ("May 14, 2014, 09:10:32 PM") and common variants
+        "%B %d, %Y, %I:%M:%S %p",
+        "%B %d, %Y, %H:%M:%S",
+        "%b %d, %Y, %I:%M:%S %p",
+        "%b %d, %Y, %H:%M:%S",
+        "%d %B %Y, %H:%M:%S",
+        "%d %b %Y, %H:%M:%S",
+        "%d %B %Y, %I:%M:%S %p",
+        "%Y-%m-%d, %H:%M:%S",
         "%a %b %d, %Y %H:%M",
         "%a %b %d, %Y %I:%M:%S %p",
         "%b %d, %Y %I:%M %p",
@@ -343,6 +352,12 @@ pub fn parse_date(s: &str) -> Option<String> {
     for f in FORMATS {
         if let Ok(d) = NaiveDateTime::parse_from_str(s, f) {
             return Some(d.format("%Y-%m-%dT%H:%M:%S").to_string());
+        }
+    }
+    // Date only ("Jun 3, 2005"): midnight.
+    for f in ["%b %d, %Y", "%B %d, %Y", "%d %b %Y", "%d %B %Y", "%Y-%m-%d"] {
+        if let Ok(d) = chrono::NaiveDate::parse_from_str(s, f) {
+            return Some(d.format("%Y-%m-%dT00:00:00").to_string());
         }
     }
     // Trailing junk (", edited 2 times in total", timezone names): try shorter prefixes.
@@ -525,6 +540,7 @@ mod tests {
         assert_eq!(parse_date("Mon Jan 01, 2007 1:23 pm").as_deref(), Some("2007-01-01T13:23:00"));
         assert_eq!(parse_date("Sun Jan 08, 2017 10:14 am Post subject").as_deref(), Some("2017-01-08T10:14:00"));
         assert_eq!(parse_date("yesterday"), None);
+        assert_eq!(parse_date("Jun 3, 2005").as_deref(), Some("2005-06-03T00:00:00"));
     }
 
     #[test]

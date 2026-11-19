@@ -77,6 +77,12 @@ main { padding-bottom: 2rem; }
 .post-body dl.codebox code { display: block; white-space: pre; overflow-x: auto; max-height: 30rem; padding: .75rem; background: var(--panel-2); border-radius: var(--radius); }
 .post-body table { max-width: 100%; }
 .post-body td.quote { padding: .6rem .9rem; background: var(--panel-2); border-left: 3px solid var(--accent); }
+/* SMF: "Quote from: …" / "Code:" headers above div.quote / div.code (1.x) or
+   blockquote / code.bbc_code (2.x). */
+.post-body .quoteheader, .post-body .codeheader { font-size: .85em; color: var(--muted); margin-top: .75rem; }
+.post-body .codeheader a { display: none; }
+.post-body div.quote { margin: .2rem 0 .75rem; padding: .6rem .9rem; background: var(--panel-2); border-left: 3px solid var(--accent); }
+.post-body div.code, .post-body code.bbc_code, .post-body pre.bbc_code { display: block; margin: .2rem 0 .75rem; padding: .75rem; background: var(--panel-2); border-radius: var(--radius); font-family: ui-monospace, Consolas, monospace; font-size: .9em; overflow-x: auto; max-height: 30rem; white-space: nowrap; }
 .post-body td.code { padding: .6rem .9rem; background: var(--panel-2); font-family: ui-monospace, Consolas, monospace; font-size: .9em; overflow-x: auto; }
 .attachments { list-style: none; margin: 0; padding: .6rem 1rem; border-top: 1px solid var(--line); font-size: .9rem; }
 

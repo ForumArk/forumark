@@ -1,6 +1,7 @@
 //! Forum-software parsers. Each turns one HTML page into the normalized model.
 
 pub mod phpbb;
+pub mod smf;
 pub mod xenforo;
 
 use anyhow::Result;
@@ -16,6 +17,8 @@ pub enum Software {
     Xenforo,
     /// phpBB 2 and 3.
     Phpbb,
+    /// SMF (Simple Machines Forum) 1.x and 2.x.
+    Smf,
 }
 
 /// Parse a page with the given (or detected) parser.
@@ -23,6 +26,7 @@ pub fn parse_page(html: &str, url: &str, software: Software) -> Result<Option<Pa
     match software {
         Software::Xenforo => xenforo::parse(html, url),
         Software::Phpbb => phpbb::parse(html, url),
+        Software::Smf => smf::parse(html, url),
         Software::Auto => {
             let doc = Html::parse_document(html);
             // Structural XenForo markers first, then phpBB, then the looser XenForo check
@@ -31,6 +35,8 @@ pub fn parse_page(html: &str, url: &str, software: Software) -> Result<Option<Pa
                 xenforo::parse(html, url)
             } else if phpbb::detect(&doc) {
                 phpbb::parse(html, url)
+            } else if smf::detect(&doc) {
+                smf::parse(html, url)
             } else if xenforo::detect(&doc) {
                 xenforo::parse(html, url)
             } else {

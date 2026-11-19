@@ -185,6 +185,79 @@ pub fn script_dir(url: &str) -> String {
     }
 }
 
+/// A link to an SMF (Simple Machines Forum) page. SMF puts everything behind
+/// `index.php`, either as a query (`index.php?topic=12.30`, parameters joined by
+/// `;`) or as a "queryless" path (`index.php/topic,12.30.html`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmfLink {
+    /// `topic=ID.START`
+    Topic { id: i64, start: u32 },
+    /// `topic=ID.msgPOST` or `msg=POST`
+    Post { id: i64 },
+    /// `board=ID.START`
+    Board { id: i64, start: u32 },
+    /// `action=profile;u=ID`
+    Member { id: i64 },
+}
+
+/// SMF's key/value pairs from either URL style, lower-cased keys, in order.
+/// Returns `None` if the URL isn't an SMF `index.php` address.
+pub fn smf_params(url: &str) -> Option<Vec<(String, String)>> {
+    let url = strip_wayback(url.trim()).replace("&amp;", "&");
+    let url = url.split('#').next().unwrap_or("");
+    let i = url.find("index.php")?;
+    let rest = &url[i + "index.php".len()..];
+    let mut out = Vec::new();
+    let mut add = |kv: &str, sep: char| {
+        if kv.is_empty() {
+            return;
+        }
+        match kv.split_once(sep) {
+            Some((k, v)) => out.push((k.to_ascii_lowercase(), v.to_string())),
+            None => out.push((kv.to_ascii_lowercase(), String::new())),
+        }
+    };
+    let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
+    // Queryless: /topic,12.30.html or /topic,12.0/prev_next,next.html
+    for seg in path.split('/') {
+        let seg = seg.strip_suffix(".html").unwrap_or(seg);
+        add(seg, ',');
+    }
+    for kv in query.split([';', '&']) {
+        add(kv, '=');
+    }
+    Some(out)
+}
+
+/// Recognise an SMF topic, post, board or member link.
+pub fn smf_link(url: &str) -> Option<SmfLink> {
+    let params = smf_params(url)?;
+    let get = |k: &str| params.iter().find(|(key, _)| key == k).map(|(_, v)| v.as_str());
+    if let Some(v) = get("topic") {
+        let (id, rest) = v.split_once('.').unwrap_or((v, "0"));
+        let id: i64 = id.parse().ok()?;
+        if let Some(m) = rest.strip_prefix("msg") {
+            return m.parse().ok().map(|id| SmfLink::Post { id });
+        }
+        return rest.parse().ok().map(|start| SmfLink::Topic { id, start });
+    }
+    if let Some(m) = get("msg") {
+        if get("action").is_none() {
+            return m.parse().ok().map(|id| SmfLink::Post { id });
+        }
+    }
+    if let Some(v) = get("board") {
+        if get("action").is_none() {
+            let (id, rest) = v.split_once('.').unwrap_or((v, "0"));
+            return Some(SmfLink::Board { id: id.parse().ok()?, start: rest.parse().unwrap_or(0) });
+        }
+    }
+    if get("action") == Some("profile") && get("sa").is_none() {
+        return get("u").and_then(|u| u.parse().ok()).map(|id| SmfLink::Member { id });
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,6 +294,23 @@ mod tests {
         assert_eq!(page_number("/threads/a.1/page-7"), 7);
         assert_eq!(page_number("/threads/a.1/"), 1);
         assert_eq!(base_path("/threads/a.1/page-7", "threads").as_deref(), Some("/threads/a.1/"));
+    }
+
+    #[test]
+    fn smf_links() {
+        use SmfLink::*;
+        assert_eq!(smf_link("https://f.example/index.php?topic=4.25"), Some(Topic { id: 4, start: 25 }));
+        assert_eq!(smf_link("http://f.example:80/index.php/topic,20005.0.html"), Some(Topic { id: 20005, start: 0 }));
+        assert_eq!(smf_link("http://f.example/index.php/topic,20005.msg252118.html#msg252118"), Some(Post { id: 252118 }));
+        assert_eq!(smf_link("https://f.example/index.php?topic=4.msg561960#msg561960"), Some(Post { id: 561960 }));
+        assert_eq!(smf_link("https://f.example/index.php?msg=561971"), Some(Post { id: 561971 }));
+        assert_eq!(smf_link("https://f.example/forum/index.php?board=13.0"), Some(Board { id: 13, start: 0 }));
+        assert_eq!(smf_link("http://f.example/index.php/board,108.40.html"), Some(Board { id: 108, start: 40 }));
+        assert_eq!(smf_link("https://f.example/index.php?action=profile;u=5903"), Some(Member { id: 5903 }));
+        assert_eq!(smf_link("https://f.example/index.php?action=profile;u=5;sa=showPosts"), None);
+        assert_eq!(smf_link("https://f.example/index.php?topic=4.new#new"), None);
+        assert_eq!(smf_link("https://f.example/index.php#c2"), None);
+        assert_eq!(smf_link("https://f.example/index.php?threads/a.1/"), None);
     }
 
     #[test]

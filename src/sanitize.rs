@@ -13,7 +13,7 @@ use std::sync::Arc;
 use crate::embeds::embeds_to_links;
 use crate::tidy::{smilies_to_emoji, staff_notes};
 
-use crate::urls::{PhpbbLink, id_after, normalize_path, page_number, phpbb_link, strip_wayback};
+use crate::urls::{PhpbbLink, SmfLink, id_after, normalize_path, page_number, phpbb_link, smf_link, strip_wayback};
 
 /// Archive href for a route/id/page, e.g. `/rm/threads/4242/page-2/`.
 pub fn local_href(base: &str, route: &str, id: i64, page: u32) -> String {
@@ -164,6 +164,11 @@ impl LinkContext {
         if page <= 1 {
             return thread_url.to_string();
         }
+        // SMF: index.php?topic=12.0 → index.php?topic=12.30
+        if let Some(base) = thread_url.strip_suffix(".0").filter(|b| b.contains("?topic=")) {
+            let per_page = self.known.as_deref().map_or(0, |k| k.per_page);
+            return if per_page > 0 { format!("{base}.{}", (page - 1) * per_page) } else { thread_url.to_string() };
+        }
         if thread_url.contains("viewtopic.php") {
             let per_page = self.known.as_deref().map_or(0, |k| k.per_page);
             return if per_page > 0 { format!("{thread_url}&start={}", (page - 1) * per_page) } else { thread_url.to_string() };
@@ -186,6 +191,8 @@ impl LinkContext {
         let v = strip_wayback(value.trim());
         let absolute = if v.starts_with("//") {
             format!("https:{v}")
+        } else if v.starts_with("index.php?") && smf_link(v).is_some() {
+            self.original(&format!("{}{v}", self.board_dir))
         } else if v.starts_with('/') || v.starts_with("index.php") {
             self.original(&format!("/{}", v.trim_start_matches('/')))
         } else if let Some(rel) = self.relative_board_link(v) {
@@ -200,6 +207,19 @@ impl LinkContext {
             if !is_image {
                 if let Some(link) = phpbb_link(&absolute) {
                     if let Some(local) = self.local_phpbb(link) {
+                        return local;
+                    }
+                    return self.wayback(&absolute, false);
+                }
+                if let Some(link) = smf_link(&absolute) {
+                    // Same shapes as phpBB: topic + start offset, post, board, member.
+                    let as_phpbb = match link {
+                        SmfLink::Topic { id, start } => PhpbbLink::Topic { id, start },
+                        SmfLink::Post { id } => PhpbbLink::Post { id },
+                        SmfLink::Board { id, start } => PhpbbLink::Forum { id, start },
+                        SmfLink::Member { id } => PhpbbLink::Member { id },
+                    };
+                    if let Some(local) = self.local_phpbb(as_phpbb) {
                         return local;
                     }
                     return self.wayback(&absolute, false);
@@ -293,6 +313,12 @@ mod tests {
         );
         assert_eq!(c.original_page("https://f.example/viewtopic.php?t=5", 3), "https://f.example/viewtopic.php?t=5&start=30");
         assert_eq!(c.original_page("https://f.example/threads/a.5/", 3), "https://f.example/threads/a.5/page-3");
+        // SMF
+        assert_eq!(c.rewrite("https://forums.example.com/index.php?topic=5.30", false), "/rm/threads/5/page-3/");
+        assert_eq!(c.rewrite("https://forums.example.com/index.php/topic,5.msg99.html#msg99", false), "/rm/threads/5/page-2/#post-99");
+        assert_eq!(c.rewrite("https://forums.example.com/index.php?board=2.0", false), "/rm/forums/2/");
+        assert_eq!(c.rewrite("https://forums.example.com/index.php?action=profile;u=7", false), "/rm/members/7/");
+        assert_eq!(c.original_page("https://f.example/index.php?topic=5.0", 3), "https://f.example/index.php?topic=5.30");
     }
 
     #[test]

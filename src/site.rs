@@ -235,6 +235,10 @@ pub fn display_date(s: Option<&str>) -> String {
         return d.format("%b %-d, %Y %H:%M").to_string();
     }
     if let Ok(d) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
+        // Some old forums only show the day; don't invent a time for those.
+        if s.ends_with("T00:00:00") {
+            return d.format("%b %-d, %Y").to_string();
+        }
         return d.format("%b %-d, %Y %H:%M").to_string();
     }
     s.to_string()
@@ -842,11 +846,12 @@ pub fn build(store: &Store, opts: &BuildOptions) -> Result<BuildReport> {
         )
         .unwrap_or(0);
 
-    // phpBB boards often live in a folder (`/forum/viewtopic.php`): take it from the threads.
+    // phpBB and SMF boards often live in a folder (`/forum/viewtopic.php`): take it from the threads.
     let board_dir: String = conn
         .query_row(
-            "SELECT substr(path, 1, instr(path, 'viewtopic.php') - 1) AS d FROM threads
-              WHERE path LIKE '%viewtopic.php%' GROUP BY d ORDER BY COUNT(*) DESC LIMIT 1",
+            "SELECT CASE WHEN instr(path, 'viewtopic.php') > 0 THEN substr(path, 1, instr(path, 'viewtopic.php') - 1)
+                         ELSE substr(path, 1, instr(path, 'index.php?topic=') - 1) END AS d FROM threads
+              WHERE path LIKE '%viewtopic.php%' OR path LIKE '%index.php?topic=%' GROUP BY d ORDER BY COUNT(*) DESC LIMIT 1",
             [],
             |r| r.get(0),
         )

@@ -57,6 +57,9 @@ pub fn capture_key(url: &str) -> Option<String> {
     if let Some(key) = phpbb_capture_key(raw) {
         return key;
     }
+    if let Some(key) = smf_capture_key(raw) {
+        return key;
+    }
     // Real query strings (not the XenForo 1 `index.php?route` form) mean filtered
     // or sorted listings, reply forms, etc. Skip them.
     let after_host = raw.split("://").nth(1).unwrap_or(raw);
@@ -125,6 +128,29 @@ fn phpbb_capture_key(raw: &str) -> Option<Option<String>> {
     })
 }
 
+/// SMF keys, same shapes as phpBB. `None` = not an SMF address; `Some(None)` = an
+/// SMF variant we skip (print view, "all posts", next/previous, sorted lists, ...).
+fn smf_capture_key(raw: &str) -> Option<Option<String>> {
+    use crate::urls::{SmfLink, smf_link, smf_params};
+    let params = smf_params(raw)?;
+    if !params.iter().any(|(k, _)| k == "topic" || k == "board" || k == "msg") {
+        return None;
+    }
+    let ok = |k: &str| matches!(k, "topic" | "board" | "msg" | "phpsessid" | "topicseen" | "") || k.starts_with("utm_");
+    if !params.iter().all(|(k, _)| ok(k)) {
+        return Some(None);
+    }
+    let with_start = |route: &str, id: i64, start: u32| {
+        if start > 0 { format!("/{route}/{id}/start-{start}") } else { format!("/{route}/{id}") }
+    };
+    Some(match smf_link(raw) {
+        Some(SmfLink::Topic { id, start }) => Some(with_start("threads", id, start)),
+        Some(SmfLink::Post { id }) => Some(format!("/posts/{id}")),
+        Some(SmfLink::Board { id, start }) => Some(with_start("forums", id, start)),
+        _ => None,
+    })
+}
+
 fn client(timeout_secs: u64) -> Result<reqwest::blocking::Client> {
     Ok(reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
@@ -178,10 +204,17 @@ pub fn default_prefixes(host: &str, software: Software) -> Vec<String> {
         format!("{host}/index.php?forums/"),
     ];
     let phpbb = [format!("{host}/viewtopic.php"), format!("{host}/viewforum.php")];
+    let smf = [
+        format!("{host}/index.php?topic="),
+        format!("{host}/index.php?board="),
+        format!("{host}/index.php/topic,"),
+        format!("{host}/index.php/board,"),
+    ];
     match software {
         Software::Xenforo => xenforo.to_vec(),
         Software::Phpbb => phpbb.to_vec(),
-        Software::Auto => xenforo.into_iter().chain(phpbb).collect(),
+        Software::Smf => smf.to_vec(),
+        Software::Auto => xenforo.into_iter().chain(phpbb).chain(smf).collect(),
     }
 }
 
@@ -471,5 +504,21 @@ mod tests {
         assert_eq!(capture_key("https://f.com/viewtopic.php?t=9&postorder=desc"), None);
         assert_eq!(capture_key("https://f.com/viewtopic.php"), None);
         assert_eq!(capture_key("https://f.com/memberlist.php?mode=viewprofile&u=3"), None);
+    }
+
+    #[test]
+    fn smf_keys() {
+        assert_eq!(capture_key("https://f.com/index.php?topic=4.0").as_deref(), Some("/threads/4"));
+        assert_eq!(capture_key("https://f.com/index.php?topic=4.25").as_deref(), Some("/threads/4/start-25"));
+        assert_eq!(capture_key("http://f.com:80/index.php/topic,20005.0.html").as_deref(), Some("/threads/20005"));
+        assert_eq!(capture_key("http://f.com:80/index.php?topic=20005.msg253566").as_deref(), Some("/posts/253566"));
+        assert_eq!(capture_key("https://f.com/forum/index.php?board=100.0").as_deref(), Some("/forums/100"));
+        assert_eq!(capture_key("https://f.com/index.php?board=1").as_deref(), Some("/forums/1"));
+        assert_eq!(capture_key("https://f.com/index.php?topic=4.0;all"), None);
+        assert_eq!(capture_key("https://f.com/index.php?topic=10015.0;prev_next=next"), None);
+        assert_eq!(capture_key("http://f.com/index.php/topic,20005.0/prev_next,prev.html"), None);
+        assert_eq!(capture_key("https://f.com/index.php?action=printpage;topic=4.0"), None);
+        assert_eq!(capture_key("https://f.com/index.php?topic=4.new"), None);
+        assert_eq!(capture_key("https://f.com/index.php?threads/a.9/page-2").as_deref(), Some("/threads/9/page-2"));
     }
 }

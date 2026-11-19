@@ -25,6 +25,7 @@ Supported forum software today:
 |---|---|---|
 | **XenForo** | 1 and 2 | |
 | **phpBB** | 2 and 3.0–3.3 | prosilver, subSilver and look-alike themes. Boards in a sub-folder (`/forum/`, `/phpBB2/`) work too. |
+| **SMF** (Simple Machines Forum) | 1.x and 2.0–2.1 | Default and custom themes, both `index.php?topic=1.0` and `index.php/topic,1.0.html` addresses. |
 
 The software is detected automatically for each page. More parsers are welcome (see *Contributing*).
 
@@ -49,6 +50,7 @@ Everything is stored in one database file (`archive.db` by default, change it wi
 forumark wayback list --host forums.example.com
 #    A phpBB board in a sub-folder: include the folder, and say which software it is
 #    forumark wayback list --host www.example.com/phpBB2 --software phpbb
+#    (--software can be xenforo, phpbb or smf; the default tries all of them)
 
 # 2. Download them, politely (3 at a time, 1 second apart)
 forumark wayback fetch --raw-dir raw
@@ -118,7 +120,7 @@ Wayback CDX list ──▶ polite fetch ──▶ parser (XenForo 1/2) ──▶
 ```
 
 - `src/wayback.rs`: lists captures through the CDX API and fetches them with retries and backoff (the Wayback Machine is often briefly offline).
-- `src/parse/`: one parser per forum software (`xenforo.rs`, `phpbb.rs`), turning a page into threads, posts, forums and members.
+- `src/parse/`: one parser per forum software (`xenforo.rs`, `phpbb.rs`, `smf.rs`), turning a page into threads, posts, forums and members.
 - `src/store.rs`: the SQLite archive. A forum-listing row never overwrites data from the thread page itself.
 - `src/sanitize.rs`: cleans post HTML and rewrites links (internal links stay inside the archive, images and files go to the Wayback Machine).
 - `src/site.rs` + `templates/`: builds the website. Templates and CSS are compiled into the program.
@@ -127,7 +129,7 @@ Run the tests with `cargo test`.
 
 ## Contributing
 
-Bug reports and new forum parsers (vBulletin, SMF, Invision, MyBB, Discourse, …) are very welcome. A parser is one file in `src/parse/` plus a few saved example pages in `tests/fixtures/`. Please use made-up example content in fixtures, not real people's posts.
+Bug reports and new forum parsers (vBulletin, Invision, MyBB, Discourse, …) are very welcome. A parser is one file in `src/parse/` plus a few saved example pages in `tests/fixtures/`. Please use made-up example content in fixtures, not real people's posts.
 
 **Is your forum closing?** Open an issue with its address and closing date.
 
