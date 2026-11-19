@@ -28,6 +28,7 @@ use rusqlite::{Connection, params};
 use serde::Serialize;
 use serde_json::json;
 
+use crate::removals::{Applied, Removals, hide_emails};
 use crate::sanitize::{KnownPages, LinkContext, clean_post_html, local_href};
 use crate::store::Store;
 
@@ -60,6 +61,8 @@ pub struct BuildOptions {
     /// Another, more complete archive of the same forum: (name, address). When set,
     /// the archive's front page and its "not preserved" pages point visitors there.
     pub see_also: Option<(String, String)>,
+    /// Removal requests: content left out of the site (see `removals`).
+    pub removals: Removals,
 }
 
 /// A curated list of boards, shown as one A–Z page per board.
@@ -322,6 +325,8 @@ fn write_page(out: &Path, rel_dir: &str, html: &str) -> Result<()> {
 
 struct Builder<'a> {
     conn: &'a Connection,
+    /// Removal requests in effect on `conn` for this build.
+    removals: Applied<'a>,
     opts: &'a BuildOptions,
     env: Environment<'static>,
     links: LinkContext,
@@ -491,7 +496,7 @@ impl<'a> Builder<'a> {
                     } else {
                         self.links.wayback(&self.links.original(&path), false)
                     };
-                    Ok(Row { title: r.get(1)?, href, author: r.get(3)?, posts: n, last: display_date(last.as_deref()) })
+                    Ok(Row { title: r.get(1)?, href, author: hide_emails(&r.get::<_, String>(3)?), posts: n, last: display_date(last.as_deref()) })
                 })?
                 .collect::<rusqlite::Result<_>>()?;
             let subforums: Vec<ForumLink> = self.children(Some(id)).iter().map(|c| self.forum_link(c)).collect();
@@ -571,13 +576,18 @@ impl<'a> Builder<'a> {
                 .query_map([tid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
                 .collect::<rusqlite::Result<_>>()?;
             for (pid, page, author_id, author, posted_at, body, text) in rows {
+                // Email addresses people wrote in posts are hidden, and removed members' names
+                // are taken out of quotes.
+                let text = self.removals.scrub(&hide_emails(&text));
+                let author = hide_emails(&author);
+                let body = self.removals.scrub(&hide_emails(&clean_post_html(&body, &self.links)));
                 text_by_page.entry(page).or_default().push((author.clone(), posted_at.clone(), text));
                 by_page.entry(page).or_default().push(PostView {
                     id: pid,
                     author,
                     author_href: author_id.map(|u| local_href(&self.opts.base, "members", u, 1)),
                     date: display_date(posted_at.as_deref()),
-                    body: clean_post_html(&body, &self.links),
+                    body,
                     attachments: atts.remove(&pid).unwrap_or_default(),
                 });
             }
@@ -725,7 +735,7 @@ impl<'a> Builder<'a> {
                                     title,
                                     href,
                                     archived: n > 0,
-                                    author,
+                                    author: hide_emails(&author),
                                     started: day.unwrap_or_default(),
                                     replies: (n - 1).max(0),
                                 },
@@ -781,8 +791,10 @@ impl<'a> Builder<'a> {
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
         let mut stmt = self.conn.prepare(
+            // `main.posts` keeps the author index usable when removal views are active.
             "SELECT t.id, t.title, COUNT(*) FROM posts p JOIN threads t ON t.id = p.thread_id
-              WHERE p.author_id = ?1 GROUP BY t.id ORDER BY MAX(p.posted_at) DESC",
+              WHERE p.id IN (SELECT id FROM main.posts WHERE author_id = ?1) AND p.author_id = ?1
+              GROUP BY t.id ORDER BY MAX(p.posted_at) DESC",
         )?;
         for (uid, name) in users {
             let threads: Vec<Row> = stmt
@@ -794,7 +806,7 @@ impl<'a> Builder<'a> {
             let ctx = context! {
                 site => v(self.site()),
                 crumbs => v(Vec::<Crumb>::new()),
-                member => v(context! { name => name, posts => total }),
+                member => v(context! { name => hide_emails(&name), posts => total }),
                 threads => v(threads),
             };
             // Member pages stay out of search engines: they are about people, not topics.
@@ -810,6 +822,8 @@ pub fn build(store: &Store, opts: &BuildOptions) -> Result<BuildReport> {
     anyhow::ensure!(opts.base.starts_with('/') && opts.base.ends_with('/'), "--base must start and end with '/'");
     let conn = store.conn();
     fs::create_dir_all(&opts.out_dir)?;
+    // From here on every query sees the archive with removal requests applied.
+    let removals = opts.removals.apply(conn)?;
 
     let forums: HashMap<i64, ForumRow> = conn
         .prepare("SELECT id, title, path, parent_id FROM forums")?
@@ -866,6 +880,7 @@ pub fn build(store: &Store, opts: &BuildOptions) -> Result<BuildReport> {
 
     let mut b = Builder {
         conn,
+        removals,
         opts,
         env: env()?,
         links: LinkContext {

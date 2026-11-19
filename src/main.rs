@@ -82,6 +82,10 @@ enum Cmd {
         /// Shown on the archive's front page and on pages that weren't preserved.
         #[arg(long)]
         see_also: Option<String>,
+        /// Removal requests to apply: a text file with lines like "thread 123", "post 456",
+        /// "user 78", "anonymize 78" or a pasted archive link. Applied on every build.
+        #[arg(long)]
+        removals: Option<PathBuf>,
     },
     /// Import from the Internet Archive's Wayback Machine.
     #[command(subcommand)]
@@ -168,7 +172,7 @@ fn main() -> Result<()> {
             }
             println!("imported {threads} thread page(s), {forums} forum page(s); skipped {skipped}");
         }
-        Cmd::Build { out, origin, title, base, contact, removal_url, privacy_url, about_url, notice, threads_per_page, no_search, search_chunk, public_url, collection, see_also } => {
+        Cmd::Build { out, origin, title, base, contact, removal_url, privacy_url, about_url, notice, threads_per_page, no_search, search_chunk, public_url, collection, see_also, removals } => {
             let collections = collection.iter().map(|c| forumark::site::Collection::parse(c)).collect::<Result<Vec<_>>>()?;
             let store = Store::open(&cli.db)?;
             let opts = forumark::site::BuildOptions {
@@ -194,6 +198,14 @@ fn main() -> Result<()> {
                         _ => Err(anyhow::anyhow!("--see-also must look like \"Name|https://...\"")),
                     })
                     .transpose()?,
+                removals: match &removals {
+                    Some(path) => {
+                        let r = forumark::removals::Removals::load(path)?;
+                        eprintln!("applying {} removal request(s) from {}", r.count(), path.display());
+                        r
+                    }
+                    None => Default::default(),
+                },
             };
             let r = forumark::site::build(&store, &opts)?;
             println!(

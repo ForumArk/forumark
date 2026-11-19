@@ -251,6 +251,8 @@ pub fn clean_post_html(html: &str, ctx: &LinkContext) -> String {
         // Drop the XenForo/Wayback chrome that sometimes sits inside bodies.
         .clean_content_tags(HashSet::from(["script", "style", "noscript", "template"]))
         .attribute_filter(move |element, attribute, value| match (element, attribute) {
+            // Email links are dropped (the address itself is hidden in the text).
+            ("a", "href") if value.trim_start().to_ascii_lowercase().starts_with("mailto:") => None,
             ("a", "href") => Some(Cow::Owned(ctx.rewrite(value, false))),
             ("img", "src") => Some(Cow::Owned(ctx.rewrite(value, true))),
             _ => Some(Cow::Borrowed(value)),
@@ -268,6 +270,13 @@ mod tests {
 
     fn ctx() -> LinkContext {
         LinkContext { origin: "https://forums.example.com".into(), base: "/rm/".into(), known: None, board_dir: "/".into() }
+    }
+
+    #[test]
+    fn mailto_links_are_dropped() {
+        let out = clean_post_html(r#"<a href="mailto:a@b.com">write me</a>"#, &ctx());
+        assert!(!out.contains("mailto"), "{out}");
+        assert!(out.contains("write me"));
     }
 
     #[test]

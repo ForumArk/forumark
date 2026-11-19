@@ -101,7 +101,10 @@ When the same page was saved more than once, **the newest copy wins**.
 | `--public-url URL` | Your site's public address (e.g. `https://example.org`). Adds `sitemap.xml`, canonical links, page descriptions and structured data so search engines can find and show your archive. Member pages are kept out of search engines. |
 | `--collection "name\|Title\|ids"` | A curated A–Z list of chosen boards with a quick filter, e.g. `"plugins\|Plugins & Scripts\|184=MZ plugins,135=MV plugins"` (board ids are the numbers in `forums/<id>/`). Repeatable; shown on the archive's front page. |
 | `--see-also "Name\|https://..."` | Another, more complete archive of the same forum. The archive's front page and every "not preserved" page point visitors there. |
+| `--removals FILE` | Removal requests, applied on every build (the database is never changed, so re-imports don't bring anything back). One per line: `thread 123`, `post 456`, `user 78` or `user "Name"` (posts replaced by "removed on request", member page gone), `anonymize 78` (posts stay as "Former member"), or just paste an archive link. Removed names are also taken out of quotes and @mentions. A line it doesn't understand stops the build. |
 | `--search-chunk N` | Thread pages per search index part (default 12000). Big forums are indexed in parts so building stays within a few GB of memory; lower it if your computer runs out of memory. |
+
+Email addresses that people typed into posts are always shown as "[email hidden]", and `mailto:` links are dropped.
 
 Run `forumark --help` or `forumark <command> --help` for everything else.
 

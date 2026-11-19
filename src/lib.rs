@@ -3,6 +3,7 @@
 pub mod embeds;
 pub mod model;
 pub mod parse;
+pub mod removals;
 pub mod sanitize;
 pub mod site;
 pub mod store;

@@ -1,12 +1,12 @@
 //! End-to-end: sample pages → database → static site.
 
 use forumark::model::Capture;
+use forumark::removals::Removals;
 use forumark::parse::{Software, parse_page};
 use forumark::site::{BuildOptions, Collection, build};
 use forumark::store::Store;
 
-#[test]
-fn builds_site_with_local_links_and_missing_pages() {
+fn sample_store() -> Store {
     let mut store = Store::open_in_memory().unwrap();
     for name in ["xf2_thread.html", "xf1_thread_wayback.html", "xf2_forum.html"] {
         let html = std::fs::read_to_string(format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap();
@@ -14,9 +14,12 @@ fn builds_site_with_local_links_and_missing_pages() {
         let cap = Capture { url: name.into(), captured_at: "20210101000000".into(), source: "test".into() };
         store.save(&page, &cap).unwrap();
     }
-    let out = tempfile::tempdir().unwrap();
-    let opts = BuildOptions {
-        out_dir: out.path().to_path_buf(),
+    store
+}
+
+fn options(out: &std::path::Path) -> BuildOptions {
+    BuildOptions {
+        out_dir: out.to_path_buf(),
         base: "/rm/".into(),
         title: "Test Archive".into(),
         origin: "https://forums.example.com".into(),
@@ -31,7 +34,15 @@ fn builds_site_with_local_links_and_missing_pages() {
         public_url: Some("https://archive.example.org".into()),
         collections: vec![Collection::parse("plugins|Plugins & Scripts|12=MZ plugins,999").unwrap()],
         see_also: Some(("Other Archive".into(), "https://other.example/".into())),
-    };
+        removals: Removals::default(),
+    }
+}
+
+#[test]
+fn builds_site_with_local_links_and_missing_pages() {
+    let store = sample_store();
+    let out = tempfile::tempdir().unwrap();
+    let opts = options(out.path());
     let r = build(&store, &opts).unwrap();
     assert_eq!(r.thread_pages, 7); // 3 pages + 4 pages
     assert_eq!(r.missing_thread_pages, 5);
@@ -89,4 +100,41 @@ fn collection_specs() {
     assert!(Collection::parse("threads|X|1").is_err());
     assert!(Collection::parse("Bad Name|X|1").is_err());
     assert!(Collection::parse("ok|X|abc").is_err());
+}
+
+#[test]
+fn removal_requests_are_applied() {
+    let store = sample_store();
+    let out = tempfile::tempdir().unwrap();
+    let mut opts = options(out.path());
+    opts.removals = Removals::parse(
+        "thread 31337            # whole thread\n\
+         anonymize 777           # LightSmith keeps posts, loses name\n\
+         https://archive.example.org/rm/threads/4242/page-2/#post-900002\n",
+    )
+    .unwrap();
+    let r = build(&store, &opts).unwrap();
+    assert_eq!(r.thread_pages, 3, "thread 31337 is gone, 4242 (3 pages) stays");
+
+    assert!(!out.path().join("threads/31337").exists());
+    let page2 = std::fs::read_to_string(out.path().join("threads/4242/page-2/index.html")).unwrap();
+    assert!(page2.contains("Version 1.2 is out!"), "anonymized posts stay");
+    assert!(page2.contains("Former member"));
+    assert!(!page2.contains("LightSmith"));
+    assert!(!page2.contains("/rm/members/777/"));
+    assert!(!out.path().join("members/777").exists());
+    assert!(page2.contains("lighting-demo.png"), "attachments of anonymized posts stay");
+    assert!(!page2.contains("Thanks, works great!"));
+    assert!(page2.contains("This post was removed on request."));
+
+    let forum = std::fs::read_to_string(out.path().join("forums/12/index.html")).unwrap();
+    assert!(!forum.contains("LightSmith") && forum.contains("Former member"));
+    let urls = std::fs::read_to_string(out.path().join("sitemap-1.xml")).unwrap();
+    assert!(!urls.contains("31337"));
+    // The member who only posted in the removed thread has nothing listed.
+    let member = std::fs::read_to_string(out.path().join("members/88/index.html")).unwrap();
+    assert!(!member.contains("Old Battle System Help"));
+    // The database itself is untouched, and the views are gone after the build.
+    let n: i64 = store.conn().query_row("SELECT COUNT(*) FROM posts", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 4);
 }

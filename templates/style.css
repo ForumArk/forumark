@@ -140,3 +140,4 @@ main { padding-bottom: 2rem; }
   .az-list th:nth-child(3), .az-list td:nth-child(3) { display: none; }
   .az-filter input { max-width: none; }
 }
+.removed-note { color: var(--muted); font-style: italic; }
