@@ -90,9 +90,13 @@ enum Cmd {
 enum WaybackCmd {
     /// Step 1: list captured thread and forum pages (resumable).
     List {
-        /// Forum host, e.g. forums.rpgmakerweb.com
+        /// Forum host, e.g. forums.rpgmakerweb.com. Include the board's folder if it
+        /// lives in one, e.g. example.com/phpBB2
         #[arg(long)]
         host: String,
+        /// Forum software, to know which addresses hold threads (auto = try all).
+        #[arg(long, value_enum, default_value_t = Software::Auto)]
+        software: Software,
         /// CDX rows per request.
         #[arg(long, default_value_t = 5000)]
         batch: u32,
@@ -132,7 +136,8 @@ fn main() -> Result<()> {
             let mut store = Store::open(&cli.db)?;
             let (mut threads, mut forums, mut skipped) = (0, 0, 0);
             for file in &files {
-                let html = fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+                let bytes = fs::read(file).with_context(|| format!("reading {}", file.display()))?;
+                let html = forumark::urls::decode_html(&bytes, None);
                 let page_url = url.clone().unwrap_or_else(|| file.display().to_string());
                 let when = match &captured_at {
                     Some(t) => t.clone(),
@@ -185,9 +190,9 @@ fn main() -> Result<()> {
                 r.sitemap_urls
             );
         }
-        Cmd::Wayback(WaybackCmd::List { host, batch, prefix }) => {
+        Cmd::Wayback(WaybackCmd::List { host, software, batch, prefix }) => {
             let mut store = Store::open(&cli.db)?;
-            let prefixes = if prefix.is_empty() { forumark::wayback::default_prefixes(&host) } else { prefix };
+            let prefixes = if prefix.is_empty() { forumark::wayback::default_prefixes(&host, software) } else { prefix };
             let r = forumark::wayback::list(&mut store, &prefixes, batch, |prefix, rows| {
                 eprintln!("{prefix}: {rows} capture rows read so far");
             })?;

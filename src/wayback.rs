@@ -10,6 +10,7 @@
 //! The fetcher is deliberately gentle: a few workers, a delay between requests,
 //! and exponential backoff when the Archive is busy or offline.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -53,6 +54,9 @@ pub fn ensure_schema(conn: &Connection) -> Result<()> {
 /// Returns `None` for URLs that are not plain thread or forum pages.
 pub fn capture_key(url: &str) -> Option<String> {
     let raw = crate::urls::strip_wayback(url);
+    if let Some(key) = phpbb_capture_key(raw) {
+        return key;
+    }
     // Real query strings (not the XenForo 1 `index.php?route` form) mean filtered
     // or sorted listings, reply forms, etc. Skip them.
     let after_host = raw.split("://").nth(1).unwrap_or(raw);
@@ -85,6 +89,42 @@ pub fn capture_key(url: &str) -> Option<String> {
     None
 }
 
+/// phpBB keys: `/threads/<t>[/start-N]`, `/forums/<f>[/start-N]`, `/posts/<p>`.
+/// Returns `None` if the URL isn't a phpBB page at all, `Some(None)` for phpBB
+/// pages we skip (sorted, printed, filtered or reply-form variants).
+fn phpbb_capture_key(raw: &str) -> Option<Option<String>> {
+    use crate::urls::{PhpbbLink, phpbb_link, query_params};
+    let link = phpbb_link(raw)?;
+    let params = query_params(raw);
+    let ok_param = |k: &str, v: &str| match k {
+        "t" | "f" | "p" | "start" | "sid" | "highlight" | "hilit" => true,
+        "postdays" | "topicdays" | "st" => v == "0",
+        "postorder" => v == "asc",
+        "sk" => v == "t",
+        "sd" => v == "a" || v == "d" && raw.contains("viewforum"),
+        "utm_source" | "utm_medium" | "utm_campaign" => true,
+        _ => false,
+    };
+    if !params.iter().all(|(k, v)| ok_param(k, v)) {
+        return Some(None);
+    }
+    let with_start = |route: &str, id: i64, start: u32| {
+        if start > 0 { format!("/{route}/{id}/start-{start}") } else { format!("/{route}/{id}") }
+    };
+    let has_post = params.iter().any(|(k, v)| k == "p" && v.parse::<i64>().is_ok());
+    Some(match link {
+        // `viewtopic.php?t=1&p=55` shows the page holding post 55, whatever `start` says.
+        PhpbbLink::Topic { .. } if has_post => {
+            let p = params.iter().rev().find(|(k, _)| k == "p").and_then(|(_, v)| v.parse::<i64>().ok())?;
+            Some(format!("/posts/{p}"))
+        }
+        PhpbbLink::Topic { id, start } => Some(with_start("threads", id, start)),
+        PhpbbLink::Post { id } => Some(format!("/posts/{id}")),
+        PhpbbLink::Forum { id, start } => Some(with_start("forums", id, start)),
+        PhpbbLink::Member { .. } => None,
+    })
+}
+
 fn client(timeout_secs: u64) -> Result<reqwest::blocking::Client> {
     Ok(reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
@@ -104,7 +144,13 @@ fn get_with_retry(client: &reqwest::blocking::Client, url: &str, tries: u32) -> 
         match client.get(url).send() {
             Ok(resp) => {
                 let status = resp.status().as_u16();
-                let body = resp.text().unwrap_or_default();
+                let content_type = resp
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string);
+                let bytes = resp.bytes().map(|b| b.to_vec()).unwrap_or_default();
+                let body = crate::urls::decode_html(&bytes, content_type.as_deref());
                 // The Archive answers "Temporarily Offline" pages with various codes.
                 let offline = body.contains("<title>Internet Archive: Temporarily Offline</title>");
                 if status == 429 || status >= 500 || offline {
@@ -119,15 +165,24 @@ fn get_with_retry(client: &reqwest::blocking::Client, url: &str, tries: u32) -> 
     Err(last_err)
 }
 
-/// URL prefixes (scheme-less) that hold thread and forum pages of a XenForo forum.
-pub fn default_prefixes(host: &str) -> Vec<String> {
+/// URL prefixes (scheme-less) that hold thread and forum pages.
+///
+/// `host` may include the board's folder, e.g. `example.com/phpBB2` for a phpBB
+/// board that lives in a sub-folder.
+pub fn default_prefixes(host: &str, software: Software) -> Vec<String> {
     let host = host.trim_end_matches('/');
-    vec![
+    let xenforo = [
         format!("{host}/threads/"),
         format!("{host}/forums/"),
         format!("{host}/index.php?threads/"),
         format!("{host}/index.php?forums/"),
-    ]
+    ];
+    let phpbb = [format!("{host}/viewtopic.php"), format!("{host}/viewforum.php")];
+    match software {
+        Software::Xenforo => xenforo.to_vec(),
+        Software::Phpbb => phpbb.to_vec(),
+        Software::Auto => xenforo.into_iter().chain(phpbb).collect(),
+    }
 }
 
 #[derive(Debug, Default)]
@@ -248,9 +303,10 @@ pub fn fetch(store: &mut Store, opts: &FetchOptions, mut progress: impl FnMut(&F
     let mut jobs: Vec<Job> = store
         .conn()
         .prepare(&format!(
-            // Forum listings first (they build the board tree), then threads in ID order.
+            // Forum listings first (they build the board tree), then threads in ID order,
+            // then phpBB post links (most of which turn out to be on pages we already have).
             "SELECT key, url, timestamp FROM wayback_queue WHERE {where_clause}
-              ORDER BY key LIKE '/threads/%', key"
+              ORDER BY CASE WHEN key LIKE '/forums/%' THEN 0 WHEN key LIKE '/threads/%' THEN 1 ELSE 2 END, key"
         ))?
         .query_map([], |r| Ok(Job { key: r.get(0)?, url: r.get(1)?, timestamp: r.get(2)? }))?
         .collect::<rusqlite::Result<_>>()?;
@@ -262,11 +318,23 @@ pub fn fetch(store: &mut Store, opts: &FetchOptions, mut progress: impl FnMut(&F
         fs::create_dir_all(dir)?;
     }
 
+    // phpBB `viewtopic.php?p=N` captures show a page of some topic. Skip the ones
+    // whose post we already have (usually from a plain topic-page capture).
+    let known_posts: Arc<Mutex<HashSet<i64>>> = Arc::new(Mutex::new(HashSet::new()));
+    if jobs.iter().any(|j| j.key.starts_with("/posts/")) {
+        let mut set = known_posts.lock().unwrap();
+        for id in store.conn().prepare("SELECT id FROM posts")?.query_map([], |r| r.get::<_, i64>(0))? {
+            set.insert(id?);
+        }
+    }
+
     let queue = Arc::new(Mutex::new(jobs.into_iter()));
-    let (tx, rx) = mpsc::channel::<(Job, Result<(u16, String)>)>();
+    // `None` = not downloaded because we already have that post.
+    let (tx, rx) = mpsc::channel::<(Job, Option<Result<(u16, String)>>)>();
     let mut handles = Vec::new();
     for _ in 0..opts.workers.max(1) {
         let queue = Arc::clone(&queue);
+        let known_posts = Arc::clone(&known_posts);
         let tx = tx.clone();
         let delay = opts.delay;
         handles.push(thread::spawn(move || -> Result<()> {
@@ -274,9 +342,16 @@ pub fn fetch(store: &mut Store, opts: &FetchOptions, mut progress: impl FnMut(&F
             loop {
                 let next = queue.lock().unwrap().next();
                 let Some(job) = next else { break };
+                let post_id = job.key.strip_prefix("/posts/").and_then(|p| p.parse::<i64>().ok());
+                if post_id.is_some_and(|p| known_posts.lock().unwrap().contains(&p)) {
+                    if tx.send((job, None)).is_err() {
+                        break;
+                    }
+                    continue;
+                }
                 let url = format!("https://web.archive.org/web/{}id_/{}", job.timestamp, job.url);
                 let res = get_with_retry(&http, &url, 6);
-                if tx.send((job, res)).is_err() {
+                if tx.send((job, Some(res))).is_err() {
                     break;
                 }
                 thread::sleep(delay);
@@ -289,14 +364,21 @@ pub fn fetch(store: &mut Store, opts: &FetchOptions, mut progress: impl FnMut(&F
     let mut report = FetchReport::default();
     for (job, res) in rx {
         let status = match res {
-            Ok((200, html)) => {
+            None => {
+                report.skipped += 1;
+                "skipped:have-post".to_string()
+            }
+            Some(Ok((200, html))) => {
                 if let Some(dir) = &opts.raw_dir {
                     save_raw(dir, &job, &html)?;
                 }
-                match parse_page(&html, &job.url, Software::Xenforo) {
+                match parse_page(&html, &job.url, Software::Auto) {
                     Ok(Some(page)) => {
                         let cap = Capture { url: job.url.clone(), captured_at: job.timestamp.clone(), source: "wayback".into() };
                         store.save(&page, &cap)?;
+                        if let crate::model::Page::Thread(t) = &page {
+                            known_posts.lock().unwrap().extend(t.posts.iter().map(|p| p.id));
+                        }
                         report.ok += 1;
                         "ok".to_string()
                     }
@@ -310,11 +392,11 @@ pub fn fetch(store: &mut Store, opts: &FetchOptions, mut progress: impl FnMut(&F
                     }
                 }
             }
-            Ok((code, _)) => {
+            Some(Ok((code, _))) => {
                 report.errors += 1;
                 format!("error:HTTP {code}")
             }
-            Err(e) => {
+            Some(Err(e)) => {
                 report.errors += 1;
                 format!("error:{e}")
             }
@@ -370,5 +452,24 @@ mod tests {
         assert_eq!(capture_key("https://f.com/threads/a.1/page-2?foo=1"), None);
         assert_eq!(capture_key("https://f.com/members/bob.1/"), None);
         assert_eq!(capture_key("https://f.com/threads/a.1/page-1").as_deref(), Some("/threads/1"));
+    }
+
+    #[test]
+    fn phpbb_keys() {
+        assert_eq!(capture_key("http://f.com:80/phpBB/viewtopic.php?t=200004").as_deref(), Some("/threads/200004"));
+        assert_eq!(
+            capture_key("http://f.com/phpBB/viewtopic.php?t=9&postdays=0&postorder=asc&start=15").as_deref(),
+            Some("/threads/9/start-15")
+        );
+        assert_eq!(
+            capture_key("https://f.com/community/viewtopic.php?f=1&t=427852&p=6418955&sid=2fb6").as_deref(),
+            Some("/posts/6418955")
+        );
+        assert_eq!(capture_key("https://f.com/viewtopic.php?p=55#p55").as_deref(), Some("/posts/55"));
+        assert_eq!(capture_key("https://f.com/viewforum.php?f=3&start=50").as_deref(), Some("/forums/3/start-50"));
+        assert_eq!(capture_key("https://f.com/viewtopic.php?t=9&view=print"), None);
+        assert_eq!(capture_key("https://f.com/viewtopic.php?t=9&postorder=desc"), None);
+        assert_eq!(capture_key("https://f.com/viewtopic.php"), None);
+        assert_eq!(capture_key("https://f.com/memberlist.php?mode=viewprofile&u=3"), None);
     }
 }

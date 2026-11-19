@@ -13,12 +13,20 @@ Live example: the RPG Maker Forums archive at [thecodelair.com](https://thecodel
 - Every thread, page by page, with authors, dates and posts, plus forum listings and member pages.
 - Full-text search that runs in the browser ([Pagefind](https://pagefind.app)), with no search server needed.
 - Embedded videos and posts (YouTube, Imgur, X/Twitter, Pastebin, …) become links to the original, and old smilies become emoji.
+- Old pages in other character sets (common on 2000s forums) are read correctly, so accents and symbols survive.
 - Clean, readable pages with light/dark mode and a larger-text setting, and a layout that works on phones.
-- Stable links: `threads/<id>/page-N/`. Old forum links inside posts are rewritten to point inside the archive.
+- Stable links: `threads/<id>/page-N/`. Old forum links inside posts are rewritten to point inside the archive, and links to a single post open the right page at that post.
 - Pages that were never captured still exist, with a "not preserved" note and a link to the Wayback Machine, so links don't break.
 - **Images and attachments are not copied.** They link to the Wayback Machine's own copies. That keeps your archive small and avoids re-hosting other people's files.
 
-Supported forum software today: **XenForo 1 and 2**. More parsers are welcome (see *Contributing*).
+Supported forum software today:
+
+| Software | Versions | Notes |
+|---|---|---|
+| **XenForo** | 1 and 2 | |
+| **phpBB** | 2 and 3.0–3.3 | prosilver, subSilver and look-alike themes. Boards in a sub-folder (`/forum/`, `/phpBB2/`) work too. |
+
+The software is detected automatically for each page. More parsers are welcome (see *Contributing*).
 
 ## Download
 
@@ -39,6 +47,8 @@ Everything is stored in one database file (`archive.db` by default, change it wi
 ```bash
 # 1. List every saved thread and forum page (can take a while for big forums)
 forumark wayback list --host forums.example.com
+#    A phpBB board in a sub-folder: include the folder, and say which software it is
+#    forumark wayback list --host www.example.com/phpBB2 --software phpbb
 
 # 2. Download them, politely (3 at a time, 1 second apart)
 forumark wayback fetch --raw-dir raw
@@ -108,7 +118,7 @@ Wayback CDX list ──▶ polite fetch ──▶ parser (XenForo 1/2) ──▶
 ```
 
 - `src/wayback.rs`: lists captures through the CDX API and fetches them with retries and backoff (the Wayback Machine is often briefly offline).
-- `src/parse/`: one parser per forum software, turning a page into threads, posts, forums and members.
+- `src/parse/`: one parser per forum software (`xenforo.rs`, `phpbb.rs`), turning a page into threads, posts, forums and members.
 - `src/store.rs`: the SQLite archive. A forum-listing row never overwrites data from the thread page itself.
 - `src/sanitize.rs`: cleans post HTML and rewrites links (internal links stay inside the archive, images and files go to the Wayback Machine).
 - `src/site.rs` + `templates/`: builds the website. Templates and CSS are compiled into the program.
@@ -117,7 +127,7 @@ Run the tests with `cargo test`.
 
 ## Contributing
 
-Bug reports and new forum parsers (phpBB, vBulletin, Discourse, SMF, …) are very welcome. A parser is one file in `src/parse/` plus a few saved example pages in `tests/fixtures/`. Please use made-up example content in fixtures, not real people's posts.
+Bug reports and new forum parsers (vBulletin, SMF, Invision, MyBB, Discourse, …) are very welcome. A parser is one file in `src/parse/` plus a few saved example pages in `tests/fixtures/`. Please use made-up example content in fixtures, not real people's posts.
 
 **Is your forum closing?** Open an issue with its address and closing date.
 

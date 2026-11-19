@@ -580,7 +580,7 @@ impl<'a> Builder<'a> {
                 let posts = by_page.remove(&page).unwrap_or_default();
                 let missing = if posts.is_empty() {
                     self.report.missing_thread_pages += 1;
-                    let orig = if page > 1 { format!("{original_thread}page-{page}") } else { original_thread.clone() };
+                    let orig = self.links.original_page(&original_thread, page);
                     Some(self.links.wayback(&orig, false))
                 } else {
                     None
@@ -826,6 +826,31 @@ pub fn build(store: &Store, opts: &BuildOptions) -> Result<BuildReport> {
     for row in conn.prepare("SELECT id FROM users")?.query_map([], |r| r.get::<_, i64>(0))? {
         known.members.insert(row?);
     }
+    for row in conn.prepare("SELECT id, thread_id, page FROM posts")?.query_map([], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, u32>(2)?))
+    })? {
+        let (id, thread, page) = row?;
+        known.posts.insert(id, (thread, page));
+    }
+    // Posts per page: the fullest first page of any multi-page thread.
+    known.per_page = conn
+        .query_row(
+            "SELECT COALESCE(MAX(n), 0) FROM (SELECT COUNT(*) AS n FROM posts p JOIN threads t ON t.id = p.thread_id
+               WHERE p.page = 1 AND t.total_pages > 1 GROUP BY p.thread_id)",
+            [],
+            |r| r.get::<_, u32>(0),
+        )
+        .unwrap_or(0);
+
+    // phpBB boards often live in a folder (`/forum/viewtopic.php`): take it from the threads.
+    let board_dir: String = conn
+        .query_row(
+            "SELECT substr(path, 1, instr(path, 'viewtopic.php') - 1) AS d FROM threads
+              WHERE path LIKE '%viewtopic.php%' GROUP BY d ORDER BY COUNT(*) DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| "/".to_string());
 
     let mut b = Builder {
         conn,
@@ -835,6 +860,7 @@ pub fn build(store: &Store, opts: &BuildOptions) -> Result<BuildReport> {
             origin: opts.origin.trim_end_matches('/').to_string(),
             base: opts.base.clone(),
             known: Some(std::sync::Arc::new(known)),
+            board_dir,
         },
         forums,
         thread_counts,

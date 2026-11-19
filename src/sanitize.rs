@@ -13,7 +13,7 @@ use std::sync::Arc;
 use crate::embeds::embeds_to_links;
 use crate::tidy::{smilies_to_emoji, staff_notes};
 
-use crate::urls::{id_after, normalize_path, page_number, strip_wayback};
+use crate::urls::{PhpbbLink, id_after, normalize_path, page_number, phpbb_link, strip_wayback};
 
 /// Archive href for a route/id/page, e.g. `/rm/threads/4242/page-2/`.
 pub fn local_href(base: &str, route: &str, id: i64, page: u32) -> String {
@@ -30,6 +30,9 @@ pub struct LinkContext {
     /// (a thread the Wayback Machine never saved, a deleted member, ...) go to
     /// the Wayback Machine instead of a missing archive page.
     pub known: Option<Arc<KnownPages>>,
+    /// Folder the forum software lives in (`/` or e.g. `/phpBB2/`), for relative
+    /// phpBB links such as `./viewtopic.php?t=1`.
+    pub board_dir: String,
 }
 
 /// What the site builder generates pages for.
@@ -40,6 +43,11 @@ pub struct KnownPages {
     /// Forum or category id -> its route (`forums` or `categories`).
     pub forums: HashMap<i64, &'static str>,
     pub members: HashSet<i64>,
+    /// Post id -> (thread id, page), so links to a single post open the right page.
+    pub posts: HashMap<i64, (i64, u32)>,
+    /// Posts per thread page on the original forum (0 = unknown). phpBB links say
+    /// `start=30` instead of a page number.
+    pub per_page: u32,
 }
 
 impl LinkContext {
@@ -62,6 +70,15 @@ impl LinkContext {
     /// Post permalinks (`/threads/x.1/post-9`) go to the thread's first page.
     pub fn local(&self, path: &str) -> Option<String> {
         let known = self.known.as_deref();
+        // XenForo post links: `/posts/9/`, `/threads/x.1/post-9`, `/goto/post?id=9`.
+        let post_id = id_after(path, "posts").or_else(|| {
+            path.split('/').find_map(|seg| seg.strip_prefix("post-").and_then(|n| n.parse().ok()))
+        });
+        if let Some(pid) = post_id {
+            if let Some(href) = self.post_href(pid) {
+                return Some(href);
+            }
+        }
         if let Some(id) = id_after(path, "threads") {
             let page = page_number(path);
             if let Some(k) = known {
@@ -91,6 +108,69 @@ impl LinkContext {
         None
     }
 
+    /// phpBB posts often link relatively (`./viewtopic.php?t=1`, `viewtopic.php?p=2`).
+    /// Those resolve against the board folder, which the stored path doesn't know
+    /// here, but the script name is enough to recognise and map them.
+    fn relative_board_link(&self, v: &str) -> Option<String> {
+        let rel = v.strip_prefix("./").unwrap_or(v);
+        if rel.contains("://") || rel.starts_with('#') || rel.starts_with("mailto:") {
+            return None;
+        }
+        phpbb_link(rel)?;
+        Some(self.original(&format!("{}{rel}", self.board_dir)))
+    }
+
+    /// Archive link to one post (its page plus `#post-N`), if the archive has it.
+    fn post_href(&self, post: i64) -> Option<String> {
+        let &(thread, page) = self.known.as_deref()?.posts.get(&post)?;
+        Some(format!("{}#post-{post}", local_href(&self.base, "threads", thread, page)))
+    }
+
+    /// Archive-local href for a phpBB link, if the archive has that page.
+    fn local_phpbb(&self, link: PhpbbLink) -> Option<String> {
+        let known = self.known.as_deref();
+        match link {
+            PhpbbLink::Topic { id, start } => {
+                let per_page = known.map_or(0, |k| k.per_page);
+                let page = if start > 0 && per_page > 0 { start / per_page + 1 } else { 1 };
+                if let Some(k) = known {
+                    match k.threads.get(&id) {
+                        Some(&pages) if page <= pages => {}
+                        Some(_) => return Some(local_href(&self.base, "threads", id, 1)),
+                        None => return None,
+                    }
+                }
+                Some(local_href(&self.base, "threads", id, page))
+            }
+            PhpbbLink::Post { id } => self.post_href(id),
+            PhpbbLink::Forum { id, .. } => {
+                let route = match known {
+                    Some(k) => *k.forums.get(&id)?,
+                    None => "forums",
+                };
+                Some(local_href(&self.base, route, id, 1))
+            }
+            PhpbbLink::Member { id } => {
+                if known.is_some_and(|k| !k.members.contains(&id)) {
+                    return None;
+                }
+                Some(local_href(&self.base, "members", id, 1))
+            }
+        }
+    }
+
+    /// Original-forum URL of page `page` of a thread whose page-1 URL is `thread_url`.
+    pub fn original_page(&self, thread_url: &str, page: u32) -> String {
+        if page <= 1 {
+            return thread_url.to_string();
+        }
+        if thread_url.contains("viewtopic.php") {
+            let per_page = self.known.as_deref().map_or(0, |k| k.per_page);
+            return if per_page > 0 { format!("{thread_url}&start={}", (page - 1) * per_page) } else { thread_url.to_string() };
+        }
+        format!("{thread_url}page-{page}")
+    }
+
     /// A Wayback Machine URL that redirects to the nearest capture of `url`.
     pub fn wayback(&self, url: &str, image: bool) -> String {
         let flag = if image { "im_" } else { "" };
@@ -108,6 +188,8 @@ impl LinkContext {
             format!("https:{v}")
         } else if v.starts_with('/') || v.starts_with("index.php") {
             self.original(&format!("/{}", v.trim_start_matches('/')))
+        } else if let Some(rel) = self.relative_board_link(v) {
+            rel
         } else {
             v.to_string()
         };
@@ -116,6 +198,12 @@ impl LinkContext {
         }
         if self.is_forum_url(&absolute) {
             if !is_image {
+                if let Some(link) = phpbb_link(&absolute) {
+                    if let Some(local) = self.local_phpbb(link) {
+                        return local;
+                    }
+                    return self.wayback(&absolute, false);
+                }
                 if let Some(local) = self.local(&normalize_path(&absolute)) {
                     return local;
                 }
@@ -159,7 +247,7 @@ mod tests {
     use super::*;
 
     fn ctx() -> LinkContext {
-        LinkContext { origin: "https://forums.example.com".into(), base: "/rm/".into(), known: None }
+        LinkContext { origin: "https://forums.example.com".into(), base: "/rm/".into(), known: None, board_dir: "/".into() }
     }
 
     #[test]
@@ -178,6 +266,33 @@ mod tests {
         assert_eq!(c.rewrite("/forums/x.9/page-4", false), "/rm/categories/9/");
         assert_eq!(c.rewrite("/members/bob.7/", false), "/rm/members/7/");
         assert_eq!(c.rewrite("/members/gone.8/", false), "https://web.archive.org/web/2/https://forums.example.com/members/gone.8/");
+    }
+
+    #[test]
+    fn phpbb_links_map_into_the_archive() {
+        let mut known = KnownPages { per_page: 15, ..Default::default() };
+        known.threads.insert(5, 3);
+        known.forums.insert(2, "forums");
+        known.members.insert(7);
+        known.posts.insert(99, (5, 2));
+        let c = LinkContext { known: Some(Arc::new(known)), ..ctx() };
+        assert_eq!(c.rewrite("./viewtopic.php?f=2&amp;t=5&amp;start=30", false), "/rm/threads/5/page-3/");
+        assert_eq!(c.rewrite("https://forums.example.com/forum/viewtopic.php?t=5", false), "/rm/threads/5/");
+        assert_eq!(c.rewrite("viewtopic.php?p=99#p99", false), "/rm/threads/5/page-2/#post-99");
+        assert_eq!(c.rewrite("./viewforum.php?f=2", false), "/rm/forums/2/");
+        assert_eq!(c.rewrite("./memberlist.php?mode=viewprofile&amp;u=7", false), "/rm/members/7/");
+        assert_eq!(
+            c.rewrite("./viewtopic.php?t=6", false),
+            "https://web.archive.org/web/2/https://forums.example.com/viewtopic.php?t=6"
+        );
+        assert_eq!(c.rewrite("/threads/a.5/post-99", false), "/rm/threads/5/page-2/#post-99");
+        let c2 = LinkContext { board_dir: "/forum/".into(), ..c.clone() };
+        assert_eq!(
+            c2.rewrite("./viewtopic.php?t=6", false),
+            "https://web.archive.org/web/2/https://forums.example.com/forum/viewtopic.php?t=6"
+        );
+        assert_eq!(c.original_page("https://f.example/viewtopic.php?t=5", 3), "https://f.example/viewtopic.php?t=5&start=30");
+        assert_eq!(c.original_page("https://f.example/threads/a.5/", 3), "https://f.example/threads/a.5/page-3");
     }
 
     #[test]

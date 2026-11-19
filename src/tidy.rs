@@ -2,6 +2,7 @@
 //!
 //! * XenForo "sprite" smilies are a blank 1×1 image plus CSS the archive doesn't
 //!   have, so they would show as broken images. They become emoji (or their code).
+//! * phpBB smilies point into the board's own image folder; they become emoji too.
 //! * RPG Maker Forums staff typed tags such as `[move]Forum[/move]` by hand. The
 //!   forum showed them as raw text; here they become small labelled notes.
 
@@ -9,7 +10,7 @@ use std::borrow::Cow;
 
 /// Replace sprite smilies with emoji. Smilies with a real image URL are left alone.
 pub fn smilies_to_emoji(html: &str) -> Cow<'_, str> {
-    if !html.contains("smilie") {
+    if !html.contains("smilie") && !html.contains("/smiles/") {
         return Cow::Borrowed(html);
     }
     let mut out = String::with_capacity(html.len());
@@ -25,6 +26,16 @@ pub fn smilies_to_emoji(html: &str) -> Cow<'_, str> {
                 Some(e) => out.push_str(&format!(r#"<span class="smilie" title="{}">{e}</span>"#, escape(&code))),
                 None => out.push_str(&format!(r#"<span class="smilie smilie-text">{}</span>"#, escape(&code))),
             }
+        } else if let Some(stem) = phpbb_smilie(tag) {
+            // phpBB smilies point into the board's own image folder (`images/smilies/`),
+            // which the archive doesn't have.
+            let code = attr(tag, "alt").map(|a| unescape(&a)).unwrap_or_default();
+            let title = attr(tag, "title").map(|a| unescape(&a)).filter(|t| !t.is_empty()).unwrap_or_else(|| code.clone());
+            match phpbb_emoji(&stem).or_else(|| emoji_for(&code)) {
+                Some(e) => out.push_str(&format!(r#"<span class="smilie" title="{}">{e}</span>"#, escape(&title))),
+                None if !code.is_empty() => out.push_str(&format!(r#"<span class="smilie smilie-text">{}</span>"#, escape(&code))),
+                None => {}
+            }
         } else {
             out.push_str(tag);
         }
@@ -32,6 +43,51 @@ pub fn smilies_to_emoji(html: &str) -> Cow<'_, str> {
     }
     out.push_str(&html[pos..]);
     Cow::Owned(out)
+}
+
+/// File name (without extension) of a phpBB smilie image, e.g. `icon_e_wink`.
+fn phpbb_smilie(tag: &str) -> Option<String> {
+    let src = attr(tag, "src")?;
+    // phpBB 3 marks them with class="smilies"; phpBB 2 uses `images/smiles/` next to
+    // the board's scripts. (XenForo's own smilie images live elsewhere and stay.)
+    let is_smilie = tag.contains("class=\"smilies\"") || src.contains("images/smilies/") || src.contains("images/smiles/");
+    if !is_smilie {
+        return None;
+    }
+    let file = src.split(['?', '#']).next()?.rsplit('/').next()?;
+    Some(file.rsplit_once('.').map_or(file, |x| x.0).to_ascii_lowercase())
+}
+
+/// phpBB's standard smilie set (phpBB 2 and 3), by image name.
+fn phpbb_emoji(stem: &str) -> Option<&'static str> {
+    let s = stem.trim_start_matches("icon_").trim_start_matches("e_");
+    Some(match s {
+        "biggrin" | "grin" => "😀",
+        "smile" | "smile2" => "🙂",
+        "wink" => "😉",
+        "sad" => "🙁",
+        "surprised" | "eek" | "shock" => "😮",
+        "confused" => "😕",
+        "cool" => "😎",
+        "lol" | "laugh" => "😆",
+        "mad" | "angry" => "😠",
+        "razz" | "tongue" => "😛",
+        "redface" | "oops" | "embarrassed" => "😳",
+        "cry" => "😢",
+        "evil" => "😈",
+        "twisted" => "👿",
+        "rolleyes" | "roll" => "🙄",
+        "exclaim" => "❗",
+        "question" => "❓",
+        "idea" => "💡",
+        "arrow" => "➡️",
+        "neutral" => "😐",
+        "mrgreen" => "😁",
+        "geek" | "ugeek" => "🤓",
+        "thumbup" | "thumbsup" => "👍",
+        "thumbdown" | "thumbsdown" => "👎",
+        _ => return None,
+    })
 }
 
 fn attr(tag: &str, name: &str) -> Option<String> {
@@ -127,6 +183,15 @@ pub fn staff_notes(html: &str) -> Cow<'_, str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn phpbb_smilies() {
+        let h = r#"hi <img src="images/smiles/icon_wink.gif" alt="Wink" border="0" /> and <img class="smilies" src="./images/smilies/icon_e_biggrin.gif" alt=":D" title="Very Happy">"#;
+        let out = smilies_to_emoji(h);
+        assert!(out.contains("😉") && out.contains("😀") && !out.contains("<img"), "{out}");
+        let other = r#"<img src="https://i.imgur.com/smiles/x.png"> <img class="smilie" alt=":x:" src="/data/attachments/smilies/x.png">"#;
+        assert!(smilies_to_emoji(other).contains("<img"));
+    }
 
     #[test]
     fn sprite_smilies_become_emoji() {

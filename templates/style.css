@@ -67,6 +67,17 @@ main { padding-bottom: 2rem; }
 .post-body blockquote, .post-body .bbCodeBlock { margin: .75rem 0; padding: .6rem .9rem; background: var(--panel-2); border-left: 3px solid var(--accent); border-radius: 0 var(--radius) var(--radius) 0; }
 .post-body pre, .post-body code { font-family: ui-monospace, Consolas, monospace; font-size: .9em; }
 .post-body pre { overflow-x: auto; padding: .75rem; background: var(--panel-2); border-radius: var(--radius); }
+/* phpBB: quotes name their author in <cite>; code boxes are <dl class="codebox">;
+   phpBB 2 draws quotes and code as tables (td.quote / td.code). */
+.post-body blockquote cite { display: block; font-style: normal; font-weight: 600; margin-bottom: .3rem; }
+.post-body dl.codebox { margin: .75rem 0; }
+.post-body dl.codebox dt { font-size: .85em; color: var(--muted); margin-bottom: .2rem; }
+.post-body dl.codebox dt a { display: none; }
+.post-body dl.codebox dd { margin: 0; }
+.post-body dl.codebox code { display: block; white-space: pre; overflow-x: auto; max-height: 30rem; padding: .75rem; background: var(--panel-2); border-radius: var(--radius); }
+.post-body table { max-width: 100%; }
+.post-body td.quote { padding: .6rem .9rem; background: var(--panel-2); border-left: 3px solid var(--accent); }
+.post-body td.code { padding: .6rem .9rem; background: var(--panel-2); font-family: ui-monospace, Consolas, monospace; font-size: .9em; overflow-x: auto; }
 .attachments { list-style: none; margin: 0; padding: .6rem 1rem; border-top: 1px solid var(--line); font-size: .9rem; }
 
 .pager { margin: 1rem 0; display: flex; gap: .35rem; flex-wrap: wrap; }

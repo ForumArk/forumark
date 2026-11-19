@@ -28,11 +28,15 @@ fn first<'a>(root: ElementRef<'a>, s: &str) -> Option<ElementRef<'a>> {
 
 /// Does this document look like a XenForo page?
 pub fn detect(doc: &Html) -> bool {
+    detect_strong(doc) || doc.html().contains("XenForo")
+}
+
+/// XenForo's own page structure (not just the word "XenForo" somewhere).
+pub fn detect_strong(doc: &Html) -> bool {
     let root = doc.root_element();
     root.value().attr("data-app").is_some()
         || root.value().attr("data-template").is_some()
         || first(root, "#XenForo, html#XenForo, .p-pageWrapper, #pageDescription, .xenOverlay").is_some()
-        || doc.html().contains("XenForo")
 }
 
 /// Parse one XenForo page. Returns `Ok(None)` for page types we don't archive
