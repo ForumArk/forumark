@@ -84,6 +84,8 @@ When the same page was saved more than once, **the newest copy wins**.
 | `--removal-url`, `--privacy-url`, `--about-url` | Links to your own policy pages, shown in the footer. |
 | `--notice TEXT` | Footer notice (default: "unofficial, read-only archive"). |
 | `--no-search` | Skip the search index (faster test builds). |
+| `--public-url URL` | Your site's public address (e.g. `https://example.org`). Adds `sitemap.xml`, canonical links, page descriptions and structured data so search engines can find and show your archive. Member pages are kept out of search engines. |
+| `--collection "name\|Title\|ids"` | A curated A–Z list of chosen boards with a quick filter, e.g. `"plugins\|Plugins & Scripts\|184=MZ plugins,135=MV plugins"` (board ids are the numbers in `forums/<id>/`). Repeatable; shown on the archive's front page. |
 | `--search-chunk N` | Thread pages per search index part (default 12000). Big forums are indexed in parts so building stays within a few GB of memory; lower it if your computer runs out of memory. |
 
 Run `forumark --help` or `forumark <command> --help` for everything else.

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ group.title }} A–Z · {{ collection.title }} · {{ site.title }}{% endblock %}
+{% block main %}
+<h1>{{ group.title }}</h1>
+<p class="summary">{{ threads|length }} threads, A–Z · <a href="{{ group.board }}">browse the board by date</a></p>
+<div class="az-filter">
+  <label for="az-filter-input">Filter by title or author</label>
+  <input type="search" id="az-filter-input" placeholder="e.g. battle, lighting, Yanfly" autocomplete="off">
+  <span class="az-count" id="az-count" aria-live="polite"></span>
+</div>
+<table class="thread-list az-list">
+<thead><tr><th>Thread</th><th>Started by</th><th>Started</th><th>Replies</th></tr></thead>
+<tbody>
+{% for t in threads %}<tr><td><a href="{{ t.href }}"{% if not t.archived %} rel="nofollow" title="Not archived yet: opens the Wayback Machine"{% endif %}>{{ t.title }}</a>{% if not t.archived %} <span class="ext" aria-hidden="true">↗</span>{% endif %}</td><td>{{ t.author }}</td><td>{{ t.started }}</td><td>{% if t.archived %}{{ t.replies }}{% endif %}</td></tr>{% endfor %}
+</tbody>
+</table>
+<script>
+// Optional quick filter: the full list works without JavaScript too.
+(function () {
+  var input = document.getElementById('az-filter-input');
+  var count = document.getElementById('az-count');
+  var rows = Array.prototype.slice.call(document.querySelectorAll('.az-list tbody tr'));
+  var text = rows.map(function (r) { return (r.cells[0].textContent + ' ' + r.cells[1].textContent).toLowerCase(); });
+  input.addEventListener('input', function () {
+    var words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+    var shown = 0;
+    rows.forEach(function (r, i) {
+      var ok = words.every(function (w) { return text[i].indexOf(w) !== -1; });
+      r.hidden = !ok;
+      if (ok) shown++;
+    });
+    count.textContent = words.length ? shown + ' of ' + rows.length : '';
+  });
+})();
+</script>
+{% endblock %}

@@ -70,6 +70,14 @@ enum Cmd {
         /// Thread pages per search index part (lower = less memory while building).
         #[arg(long, default_value_t = 12000)]
         search_chunk: usize,
+        /// Public address of the site, e.g. https://example.org (enables sitemap.xml,
+        /// canonical links and structured data for search engines).
+        #[arg(long)]
+        public_url: Option<String>,
+        /// A curated A–Z list: "name|Title|board ids", e.g.
+        /// "plugins|Plugins & Scripts|184=MZ plugins,135=MV plugins". Repeatable.
+        #[arg(long)]
+        collection: Vec<String>,
     },
     /// Import from the Internet Archive's Wayback Machine.
     #[command(subcommand)]
@@ -147,7 +155,8 @@ fn main() -> Result<()> {
             }
             println!("imported {threads} thread page(s), {forums} forum page(s); skipped {skipped}");
         }
-        Cmd::Build { out, origin, title, base, contact, removal_url, privacy_url, about_url, notice, threads_per_page, no_search, search_chunk } => {
+        Cmd::Build { out, origin, title, base, contact, removal_url, privacy_url, about_url, notice, threads_per_page, no_search, search_chunk, public_url, collection } => {
+            let collections = collection.iter().map(|c| forumark::site::Collection::parse(c)).collect::<Result<Vec<_>>>()?;
             let store = Store::open(&cli.db)?;
             let opts = forumark::site::BuildOptions {
                 out_dir: out.clone(),
@@ -162,15 +171,18 @@ fn main() -> Result<()> {
                 threads_per_page,
                 skip_search: no_search,
                 search_chunk,
+                public_url,
+                collections,
             };
             let r = forumark::site::build(&store, &opts)?;
             println!(
-                "built {} pages into {} ({} thread pages, {} not preserved); search indexed {} pages",
+                "built {} pages into {} ({} thread pages, {} not preserved); search indexed {} pages; sitemap {} urls",
                 r.pages,
                 out.display(),
                 r.thread_pages,
                 r.missing_thread_pages,
-                r.search_pages_indexed
+                r.search_pages_indexed,
+                r.sitemap_urls
             );
         }
         Cmd::Wayback(WaybackCmd::List { host, batch, prefix }) => {

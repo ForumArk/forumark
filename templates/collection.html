@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ collection.title }} · {{ site.title }}{% endblock %}
+{% block main %}
+<h1>{{ collection.title }}</h1>
+<p class="summary">{{ collection.threads }} threads, listed A–Z by board.</p>
+<ul class="forum-list collection-groups">
+{% for g in groups %}<li><a href="{{ g.href }}">{{ g.title }}</a> <span class="count">{{ g.threads }} thread{% if g.threads != 1 %}s{% endif %}</span></li>{% endfor %}
+</ul>
+{% endblock %}
