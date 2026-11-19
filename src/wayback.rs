@@ -20,7 +20,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::model::Capture;
 use crate::parse::{Software, parse_page};
@@ -46,7 +46,76 @@ pub fn ensure_schema(conn: &Connection) -> Result<()> {
             done INTEGER NOT NULL DEFAULT 0
         );",
     )?;
+    // Added in 0.6: the date cutoff a prefix was listed with (NULL = none).
+    let has_until = conn
+        .prepare("SELECT 1 FROM pragma_table_info('wayback_resume') WHERE name = 'until_ts'")?
+        .exists([])?;
+    if !has_until {
+        conn.execute_batch("ALTER TABLE wayback_resume ADD COLUMN until_ts TEXT;")?;
+    }
     Ok(())
+}
+
+/// Check a `--until` value: a Wayback timestamp prefix of 4 to 14 digits (YYYY, YYYYMMDD,
+/// YYYYMMDDhhmmss…). Dashes are allowed for convenience (2016-05-31).
+pub fn parse_until(s: &str) -> Result<String> {
+    let digits: String = s.chars().filter(|c| *c != '-').collect();
+    if !(4..=14).contains(&digits.len()) || !digits.chars().all(|c| c.is_ascii_digit()) {
+        bail!("--until must be a date like 20160531 (YYYYMMDD), got {s:?}");
+    }
+    Ok(digits)
+}
+
+/// True if a 14-digit capture timestamp falls on or before the cutoff. A short cutoff
+/// covers its whole period: 20160531 includes every capture made on May 31, 2016.
+pub fn within_until(ts: &str, until: Option<&str>) -> bool {
+    match until {
+        None => true,
+        Some(u) => ts.get(..u.len()).is_some_and(|head| head <= u),
+    }
+}
+
+/// Where listing of `prefix` stands: (resume key, finished). A prefix remembers the cutoff it
+/// was listed with, and resuming it with a different one is refused, because the half that
+/// was already read would follow other rules than the rest.
+pub fn resume_state(conn: &Connection, prefix: &str, until: Option<&str>) -> Result<(Option<String>, bool)> {
+    let row: Option<(Option<String>, bool, Option<String>)> = conn
+        .query_row("SELECT resume_key, done, until_ts FROM wayback_resume WHERE prefix = ?1", [prefix], |r| {
+            Ok((r.get(0)?, r.get::<_, i64>(1)? != 0, r.get(2)?))
+        })
+        .optional()?;
+    let Some((resume, done, stored)) = row else { return Ok((None, false)) };
+    if stored.as_deref() != until {
+        let show = |u: Option<&str>| u.map_or("no cutoff".to_string(), |u| format!("--until {u}"));
+        bail!(
+            "{prefix} was listed with {} before; this run uses {}. Use the same cutoff to resume, \
+             or start over with a new database",
+            show(stored.as_deref()),
+            show(until)
+        );
+    }
+    Ok((resume, done))
+}
+
+fn cdx_list_url(prefix: &str, batch: u32, resume: Option<&str>, until: Option<&str>) -> Result<reqwest::Url> {
+    let mut url = reqwest::Url::parse(CDX)?;
+    {
+        let mut q = url.query_pairs_mut();
+        q.append_pair("url", prefix)
+            .append_pair("matchType", "prefix")
+            .append_pair("filter", "statuscode:200")
+            .append_pair("filter", "mimetype:text/html")
+            .append_pair("fl", "timestamp,original")
+            .append_pair("limit", &batch.to_string())
+            .append_pair("showResumeKey", "true");
+        if let Some(u) = until {
+            q.append_pair("to", u);
+        }
+        if let Some(k) = resume {
+            q.append_pair("resumeKey", k);
+        }
+    }
+    Ok(url)
 }
 
 /// Key a captured URL by the page it shows, so slug changes, http/https,
@@ -224,36 +293,25 @@ pub struct ListReport {
     pub pages_queued: u64,
 }
 
-/// Step 1: list captures through the CDX API (resumable per prefix).
-pub fn list(store: &mut Store, prefixes: &[String], batch: u32, mut progress: impl FnMut(&str, u64)) -> Result<ListReport> {
+/// Step 1: list captures through the CDX API (resumable per prefix). With `until`, captures
+/// made after that date are ignored (for domains that were taken over by spam after the forum died).
+pub fn list(
+    store: &mut Store,
+    prefixes: &[String],
+    batch: u32,
+    until: Option<&str>,
+    mut progress: impl FnMut(&str, u64),
+) -> Result<ListReport> {
     ensure_schema(store.conn())?;
     let http = client(180)?;
     let mut report = ListReport::default();
     for prefix in prefixes {
-        let (mut resume, done): (Option<String>, bool) = store
-            .conn()
-            .query_row("SELECT resume_key, done FROM wayback_resume WHERE prefix = ?1", [prefix], |r| {
-                Ok((r.get(0)?, r.get::<_, i64>(1)? != 0))
-            })
-            .unwrap_or((None, false));
+        let (mut resume, done) = resume_state(store.conn(), prefix, until)?;
         if done {
             continue;
         }
         loop {
-            let mut url = reqwest::Url::parse(CDX)?;
-            {
-                let mut q = url.query_pairs_mut();
-                q.append_pair("url", prefix)
-                    .append_pair("matchType", "prefix")
-                    .append_pair("filter", "statuscode:200")
-                    .append_pair("filter", "mimetype:text/html")
-                    .append_pair("fl", "timestamp,original")
-                    .append_pair("limit", &batch.to_string())
-                    .append_pair("showResumeKey", "true");
-                if let Some(k) = &resume {
-                    q.append_pair("resumeKey", k);
-                }
-            }
+            let url = cdx_list_url(prefix, batch, resume.as_deref(), until)?;
             let (status, body) = get_with_retry(&http, url.as_str(), 8)?;
             if status != 200 {
                 bail!("CDX returned HTTP {status} for {prefix}");
@@ -269,6 +327,9 @@ pub fn list(store: &mut Store, prefixes: &[String], batch: u32, mut progress: im
                 }
                 let Some((ts, orig)) = line.split_once(' ') else { continue };
                 report.rows_seen += 1;
+                if !within_until(ts, until) {
+                    continue; // CDX already applies `to`; this is a safety net
+                }
                 let Some(key) = capture_key(orig) else { continue };
                 let changed = tx.execute(
                     "INSERT INTO wayback_queue (key, url, timestamp) VALUES (?1, ?2, ?3)
@@ -281,9 +342,10 @@ pub fn list(store: &mut Store, prefixes: &[String], batch: u32, mut progress: im
             }
             let finished = next_resume.is_none();
             tx.execute(
-                "INSERT INTO wayback_resume (prefix, resume_key, done) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(prefix) DO UPDATE SET resume_key = excluded.resume_key, done = excluded.done",
-                params![prefix, next_resume, finished as i64],
+                "INSERT INTO wayback_resume (prefix, resume_key, done, until_ts) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(prefix) DO UPDATE SET resume_key = excluded.resume_key, done = excluded.done,
+                     until_ts = excluded.until_ts",
+                params![prefix, next_resume, finished as i64, until],
             )?;
             tx.commit()?;
             progress(prefix, report.rows_seen);
@@ -471,7 +533,43 @@ pub fn queue_status(conn: &Connection) -> Result<Vec<(String, i64)>> {
 
 #[cfg(test)]
 mod tests {
-    use super::capture_key;
+    use super::*;
+
+    #[test]
+    fn until_cutoff() {
+        assert_eq!(parse_until("20160531").unwrap(), "20160531");
+        assert_eq!(parse_until("2016-05-31").unwrap(), "20160531");
+        assert!(parse_until("31-05-2016x").is_err());
+        assert!(parse_until("201").is_err());
+        assert!(within_until("20160531235959", Some("20160531")));
+        assert!(!within_until("20160601000000", Some("20160531")));
+        assert!(within_until("20990101000000", None));
+        let url = cdx_list_url("f.com/threads/", 10, Some("k"), Some("20160531")).unwrap();
+        assert!(url.as_str().contains("to=20160531"), "{url}");
+        assert!(!cdx_list_url("f.com/threads/", 10, None, None).unwrap().as_str().contains("to="));
+    }
+
+    #[test]
+    fn until_is_remembered_per_prefix() {
+        let store = Store::open_in_memory().unwrap();
+        let conn = store.conn();
+        // A database made before 0.6 has no until_ts column yet.
+        conn.execute_batch(
+            "CREATE TABLE wayback_resume (prefix TEXT PRIMARY KEY, resume_key TEXT, done INTEGER NOT NULL DEFAULT 0);
+             INSERT INTO wayback_resume VALUES ('old.com/', 'r1', 0);",
+        )
+        .unwrap();
+        ensure_schema(conn).unwrap();
+        ensure_schema(conn).unwrap(); // running it twice is fine
+        assert_eq!(resume_state(conn, "old.com/", None).unwrap(), (Some("r1".into()), false));
+        assert!(resume_state(conn, "old.com/", Some("2016")).is_err());
+        conn.execute("INSERT INTO wayback_resume VALUES ('spam.com/', 'r2', 0, '20160531')", []).unwrap();
+        assert_eq!(resume_state(conn, "spam.com/", Some("20160531")).unwrap(), (Some("r2".into()), false));
+        let err = resume_state(conn, "spam.com/", None).unwrap_err().to_string();
+        assert!(err.contains("--until 20160531"), "{err}");
+        assert!(resume_state(conn, "spam.com/", Some("20170101")).is_err());
+        assert_eq!(resume_state(conn, "new.com/", Some("2016")).unwrap(), (None, false));
+    }
 
     #[test]
     fn keys() {

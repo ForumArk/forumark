@@ -30,6 +30,7 @@ fn builds_site_with_local_links_and_missing_pages() {
         search_chunk: 12000,
         public_url: Some("https://archive.example.org".into()),
         collections: vec![Collection::parse("plugins|Plugins & Scripts|12=MZ plugins,999").unwrap()],
+        see_also: Some(("Other Archive".into(), "https://other.example/".into())),
     };
     let r = build(&store, &opts).unwrap();
     assert_eq!(r.thread_pages, 7); // 3 pages + 4 pages
@@ -45,6 +46,9 @@ fn builds_site_with_local_links_and_missing_pages() {
     assert!(missing.contains("was not preserved"));
     assert!(missing.contains("https://web.archive.org/web/2/https://forums.example.com/threads/mz-simple-lighting-plugin.4242/"));
     assert!(!missing.contains("data-pagefind-body"));
+    assert!(missing.contains(r#"<a href="https://other.example/" rel="noopener">Other Archive</a>'s more complete archive"#));
+    let home = std::fs::read_to_string(out.path().join("index.html")).unwrap();
+    assert!(home.contains("has a more complete archive of this forum"));
 
     let forum = std::fs::read_to_string(out.path().join("forums/12/index.html")).unwrap();
     assert!(forum.contains(r#"href="/rm/threads/4242/""#));

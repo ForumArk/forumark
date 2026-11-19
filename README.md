@@ -51,6 +51,8 @@ forumark wayback list --host forums.example.com
 #    A phpBB board in a sub-folder: include the folder, and say which software it is
 #    forumark wayback list --host www.example.com/phpBB2 --software phpbb
 #    (--software can be xenforo, phpbb or smf; the default tries all of them)
+#    Domain taken over by spam or parked after the forum died? Ignore the later captures:
+#    forumark wayback list --host forums.example.com --until 20160531
 
 # 2. Download them, politely (3 at a time, 1 second apart)
 forumark wayback fetch --raw-dir raw
@@ -98,6 +100,7 @@ When the same page was saved more than once, **the newest copy wins**.
 | `--no-search` | Skip the search index (faster test builds). |
 | `--public-url URL` | Your site's public address (e.g. `https://example.org`). Adds `sitemap.xml`, canonical links, page descriptions and structured data so search engines can find and show your archive. Member pages are kept out of search engines. |
 | `--collection "name\|Title\|ids"` | A curated A–Z list of chosen boards with a quick filter, e.g. `"plugins\|Plugins & Scripts\|184=MZ plugins,135=MV plugins"` (board ids are the numbers in `forums/<id>/`). Repeatable; shown on the archive's front page. |
+| `--see-also "Name\|https://..."` | Another, more complete archive of the same forum. The archive's front page and every "not preserved" page point visitors there. |
 | `--search-chunk N` | Thread pages per search index part (default 12000). Big forums are indexed in parts so building stays within a few GB of memory; lower it if your computer runs out of memory. |
 
 Run `forumark --help` or `forumark <command> --help` for everything else.

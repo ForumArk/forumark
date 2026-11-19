@@ -7,7 +7,7 @@
 <span hidden data-pagefind-filter="forum">{{ thread.forum }}</span>
 {{ m.pager(pager) }}
 {% if missing %}
-<p class="missing" data-pagefind-ignore>This page of the thread was not preserved. <a href="{{ missing }}">Try the Wayback Machine</a>.</p>
+<p class="missing" data-pagefind-ignore>This page of the thread was not preserved. <a href="{{ missing }}">Try the Wayback Machine</a>{% if site.see_also_url %}, or look for it in <a href="{{ site.see_also_url }}" rel="noopener">{{ site.see_also_name }}</a>'s more complete archive{% endif %}.</p>
 {% endif %}
 {% for p in posts %}
 <section class="post" id="post-{{ p.id }}">

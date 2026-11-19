@@ -2,6 +2,7 @@
 {% block main %}
 <h1>{{ site.title }}</h1>
 <p class="summary">{{ stats.threads }} threads · {{ stats.posts }} posts · {{ stats.users }} members</p>
+{% if site.see_also_url %}<p class="see-also">Missing a thread? <a href="{{ site.see_also_url }}" rel="noopener">{{ site.see_also_name }}</a> has a more complete archive of this forum.</p>{% endif %}
 {% if collections %}
 <div class="collections">
 {% for c in collections %}<a class="collection-card" href="{{ c.href }}"><strong>{{ c.title }}</strong><span class="count">{{ c.threads }} threads, A–Z</span><span class="groups">{{ c.groups|join(" · ") }}</span></a>{% endfor %}

@@ -78,6 +78,10 @@ enum Cmd {
         /// "plugins|Plugins & Scripts|184=MZ plugins,135=MV plugins". Repeatable.
         #[arg(long)]
         collection: Vec<String>,
+        /// A more complete archive of the same forum elsewhere: "Name|https://...".
+        /// Shown on the archive's front page and on pages that weren't preserved.
+        #[arg(long)]
+        see_also: Option<String>,
     },
     /// Import from the Internet Archive's Wayback Machine.
     #[command(subcommand)]
@@ -103,6 +107,10 @@ enum WaybackCmd {
         /// Only list these URL prefixes instead of the whole forum (repeatable).
         #[arg(long)]
         prefix: Vec<String>,
+        /// Ignore captures made after this date (YYYYMMDD). Use it when the domain was taken
+        /// over after the forum died, so spam pages don't replace the real ones.
+        #[arg(long)]
+        until: Option<String>,
     },
     /// Step 2: download, parse and save queued pages (resumable).
     Fetch {
@@ -160,7 +168,7 @@ fn main() -> Result<()> {
             }
             println!("imported {threads} thread page(s), {forums} forum page(s); skipped {skipped}");
         }
-        Cmd::Build { out, origin, title, base, contact, removal_url, privacy_url, about_url, notice, threads_per_page, no_search, search_chunk, public_url, collection } => {
+        Cmd::Build { out, origin, title, base, contact, removal_url, privacy_url, about_url, notice, threads_per_page, no_search, search_chunk, public_url, collection, see_also } => {
             let collections = collection.iter().map(|c| forumark::site::Collection::parse(c)).collect::<Result<Vec<_>>>()?;
             let store = Store::open(&cli.db)?;
             let opts = forumark::site::BuildOptions {
@@ -178,6 +186,14 @@ fn main() -> Result<()> {
                 search_chunk,
                 public_url,
                 collections,
+                see_also: see_also
+                    .map(|s| match s.split_once('|') {
+                        Some((name, url)) if !name.trim().is_empty() && url.trim().starts_with("http") => {
+                            Ok((name.trim().to_string(), url.trim().to_string()))
+                        }
+                        _ => Err(anyhow::anyhow!("--see-also must look like \"Name|https://...\"")),
+                    })
+                    .transpose()?,
             };
             let r = forumark::site::build(&store, &opts)?;
             println!(
@@ -190,10 +206,11 @@ fn main() -> Result<()> {
                 r.sitemap_urls
             );
         }
-        Cmd::Wayback(WaybackCmd::List { host, software, batch, prefix }) => {
+        Cmd::Wayback(WaybackCmd::List { host, software, batch, prefix, until }) => {
+            let until = until.as_deref().map(forumark::wayback::parse_until).transpose()?;
             let mut store = Store::open(&cli.db)?;
             let prefixes = if prefix.is_empty() { forumark::wayback::default_prefixes(&host, software) } else { prefix };
-            let r = forumark::wayback::list(&mut store, &prefixes, batch, |prefix, rows| {
+            let r = forumark::wayback::list(&mut store, &prefixes, batch, until.as_deref(), |prefix, rows| {
                 eprintln!("{prefix}: {rows} capture rows read so far");
             })?;
             println!("read {} capture rows; {} pages queued or updated", r.rows_seen, r.pages_queued);

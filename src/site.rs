@@ -57,6 +57,9 @@ pub struct BuildOptions {
     pub public_url: Option<String>,
     /// Curated A–Z lists of threads from chosen boards, e.g. "Plugins & Scripts".
     pub collections: Vec<Collection>,
+    /// Another, more complete archive of the same forum: (name, address). When set,
+    /// the archive's front page and its "not preserved" pages point visitors there.
+    pub see_also: Option<(String, String)>,
 }
 
 /// A curated list of boards, shown as one A–Z page per board.
@@ -188,6 +191,8 @@ struct Site<'a> {
     privacy_url: Option<&'a str>,
     about_url: Option<&'a str>,
     project_url: &'static str,
+    see_also_name: Option<&'a str>,
+    see_also_url: Option<&'a str>,
 }
 
 #[derive(Serialize, Clone)]
@@ -358,6 +363,8 @@ impl<'a> Builder<'a> {
             privacy_url: self.opts.privacy_url.as_deref(),
             about_url: self.opts.about_url.as_deref(),
             project_url: crate::PROJECT_URL,
+            see_also_name: self.opts.see_also.as_ref().map(|s| s.0.as_str()),
+            see_also_url: self.opts.see_also.as_ref().map(|s| s.1.as_str()),
         }
     }
 
