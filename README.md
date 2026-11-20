@@ -64,6 +64,10 @@ forumark wayback fetch --raw-dir raw --retry-errors --workers 2 --delay-ms 2000
 forumark wayback status
 forumark stats
 
+# After updating forumark (better page reading), read the saved pages again
+# without downloading anything. Start from a fresh copy of the database:
+#    forumark wayback reparse --raw-dir raw
+
 # 5. Build the website
 forumark build --out site \
   --origin https://forums.example.com \

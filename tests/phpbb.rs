@@ -89,3 +89,33 @@ fn xenforo_pages_are_not_mistaken_for_phpbb() {
     let Page::Thread(t) = page else { panic!("expected thread") };
     assert_eq!(t.thread_id, 4242);
 }
+
+#[test]
+fn phpbb3_table_theme_with_split_rows() {
+    // Custom subsilver2-style themes (HBGames' "aqua"/"hb"): the post anchor, author and date
+    // sit in one table row, the message in the next one.
+    let url = "http://board.example.org/forums/viewtopic.php?f=9&t=77";
+    let page = parse_page(&fixture("phpbb3_split_rows_topic.html"), url, Software::Phpbb).unwrap().unwrap();
+    let Page::Thread(t) = page else { panic!("expected thread") };
+    assert_eq!(t.thread_id, 77);
+    assert_eq!((t.page, t.total_pages), (1, 1));
+    let crumbs: Vec<_> = t.forums.iter().map(|f| (f.id, f.title.as_str())).collect();
+    assert_eq!(crumbs, vec![(4, "Art"), (9, "Tilesets")]);
+    assert_eq!(t.posts.len(), 2);
+
+    let p = &t.posts[0];
+    assert_eq!(p.id, 9001);
+    assert_eq!((p.author.id, p.author.name.as_str()), (Some(31), "Moss"));
+    assert_eq!(p.posted_at.as_deref(), Some("2010-01-28T01:38:00"));
+    assert!(p.body_html.contains("<strong>then</strong>"));
+    assert!(p.body_html.contains("quotecontent"));
+    assert!(!p.body_html.contains("tile shop"), "signature is not part of the post");
+    assert_eq!(p.attachments.len(), 1);
+    assert_eq!(p.attachments[0].path, "/download/file.php?id=55");
+
+    let g = &t.posts[1];
+    assert_eq!(g.id, 9002);
+    assert_eq!((g.author.id, g.author.name.as_str()), (None, "Visitor"));
+    assert_eq!(g.posted_at.as_deref(), Some("2010-01-29T21:05:00"));
+    assert_eq!(g.body_text, "Thanks, that helped.");
+}

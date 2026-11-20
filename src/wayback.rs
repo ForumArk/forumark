@@ -508,8 +508,70 @@ pub fn fetch(store: &mut Store, opts: &FetchOptions, mut progress: impl FnMut(&F
     Ok(report)
 }
 
+#[derive(Debug, Default)]
+pub struct ReparseReport {
+    pub ok: usize,
+    pub skipped: usize,
+    pub errors: usize,
+    /// Downloaded pages with no raw copy on disk (left as they were).
+    pub missing: usize,
+}
+
+/// Parse downloaded pages again from their raw copies (after a parser fix), without
+/// downloading anything. Covers every page that was downloaded (`ok`, `skipped`, parse errors).
+pub fn reparse(store: &mut Store, raw_dir: &std::path::Path, mut progress: impl FnMut(&ReparseReport, usize)) -> Result<ReparseReport> {
+    ensure_schema(store.conn())?;
+    let jobs: Vec<Job> = store
+        .conn()
+        .prepare(
+            "SELECT key, url, timestamp FROM wayback_queue
+              WHERE status IN ('ok', 'skipped') OR status LIKE 'error:parse%'
+              ORDER BY CASE WHEN key LIKE '/forums/%' THEN 0 WHEN key LIKE '/threads/%' THEN 1 ELSE 2 END, key",
+        )?
+        .query_map([], |r| Ok(Job { key: r.get(0)?, url: r.get(1)?, timestamp: r.get(2)? }))?
+        .collect::<rusqlite::Result<_>>()?;
+    let total = jobs.len();
+    let mut report = ReparseReport::default();
+    for job in jobs {
+        let path = raw_dir.join(raw_name(&job));
+        let Ok(file) = fs::File::open(&path) else {
+            report.missing += 1;
+            progress(&report, total);
+            continue;
+        };
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(file), &mut bytes)
+            .with_context(|| format!("reading {}", path.display()))?;
+        // Raw copies are saved as UTF-8 (already decoded when downloaded).
+        let html = String::from_utf8_lossy(&bytes).into_owned();
+        let status = match parse_page(&html, &job.url, Software::Auto) {
+            Ok(Some(page)) => {
+                let cap = Capture { url: job.url.clone(), captured_at: job.timestamp.clone(), source: "wayback".into() };
+                store.save(&page, &cap)?;
+                report.ok += 1;
+                "ok".to_string()
+            }
+            Ok(None) => {
+                report.skipped += 1;
+                "skipped".to_string()
+            }
+            Err(e) => {
+                report.errors += 1;
+                format!("error:parse {e}")
+            }
+        };
+        store.conn().execute("UPDATE wayback_queue SET status = ?1 WHERE key = ?2", params![status, job.key])?;
+        progress(&report, total);
+    }
+    Ok(report)
+}
+
+fn raw_name(job: &Job) -> String {
+    format!("{}_{}.html.gz", job.key.trim_start_matches('/').replace('/', "_"), job.timestamp)
+}
+
 fn save_raw(dir: &std::path::Path, job: &Job, html: &str) -> Result<()> {
-    let name = format!("{}_{}.html.gz", job.key.trim_start_matches('/').replace('/', "_"), job.timestamp);
+    let name = raw_name(job);
     let path = dir.join(name);
     let file = fs::File::create(&path).with_context(|| format!("creating {}", path.display()))?;
     let mut gz = flate2::write::GzEncoder::new(file, flate2::Compression::default());

@@ -121,6 +121,10 @@ fn parse_topic(root: ElementRef, url: &str, dir: &str) -> Option<ThreadPage> {
     if posts.is_empty() {
         posts = parse_posts_tables(root);
     }
+    // subsilver2-style custom themes that split each post over two rows (HBGames' "aqua"/"hb").
+    if posts.is_empty() {
+        posts = parse_posts_split_rows(root);
+    }
     if posts.is_empty() {
         return None;
     }
@@ -280,6 +284,59 @@ fn parse_posts_tables(root: ElementRef) -> Vec<Post> {
             body_text: text,
             attachments: attachments(cells[1]),
         });
+    }
+    posts
+}
+
+/// Table themes where one row holds the post anchor (`<a name="p123">`), author and date,
+/// and the next row holds the profile column and the message (`div.postbody`; a second
+/// `div.postbody` in the same cell is the signature).
+fn parse_posts_split_rows(root: ElementRef) -> Vec<Post> {
+    let mut posts = Vec::new();
+    for anchor in root.select(&sel("a[name^='p']")) {
+        let Some(id) = anchor.value().attr("name").and_then(|n| n.strip_prefix('p')).and_then(|n| n.parse::<i64>().ok())
+        else {
+            continue;
+        };
+        if posts.iter().any(|p: &Post| p.id == id) {
+            continue;
+        }
+        // The header row: the nearest <tr> around the anchor that is followed by another row.
+        let Some(head) = anchor
+            .ancestors()
+            .filter_map(ElementRef::wrap)
+            .filter(|e| e.value().name() == "tr")
+            .find(|tr| tr.next_siblings().filter_map(ElementRef::wrap).any(|e| e.value().name() == "tr"))
+        else {
+            continue;
+        };
+        let Some(body_row) = head.next_siblings().filter_map(ElementRef::wrap).find(|e| e.value().name() == "tr") else {
+            continue;
+        };
+        let Some(body) = first(body_row, "div.postbody, span.postbody") else { continue };
+
+        let author = head
+            .select(&sel("a[href*='mode=viewprofile']"))
+            .find_map(|a| match href_link(a) {
+                Some(PhpbbLink::Member { id }) => Some(User { id: Some(id), name: text_of(a) }),
+                _ => None,
+            })
+            .or_else(|| {
+                // Guests: the bold name next to the anchor.
+                anchor.parent().and_then(ElementRef::wrap).and_then(|cell| first(cell, "b")).map(|b| User { id: None, name: text_of(b) })
+            })
+            .filter(|u| !u.name.is_empty())
+            .unwrap_or_else(|| User { id: None, name: "Guest".into() });
+
+        let posted_at = head.select(&sel("span.genmed, .postdetails, span.gensmall, td")).map(text_of).find_map(|t| {
+            let t = t.split("Post subject").next().unwrap_or(&t).to_string();
+            let t = t.trim_start_matches("Posted:").trim_start_matches("Posted").trim();
+            parse_date(t)
+        });
+
+        let html = body.inner_html().trim().to_string();
+        let text = text_of(body);
+        posts.push(Post { id, author, posted_at, body_html: html, body_text: text, attachments: attachments(body_row) });
     }
     posts
 }
@@ -459,7 +516,7 @@ fn page_of(t: &str) -> Option<(u32, u32)> {
 /// phpBB 2: `span.nav a.nav`.
 fn breadcrumbs(root: ElementRef, dir: &str) -> Vec<Forum> {
     let mut out: Vec<Forum> = Vec::new();
-    let containers = ["#nav-breadcrumbs", "ul.navlinks", ".navlinks", "p.breadcrumbs", "td.nav, span.nav", "#breadcrumbs"];
+    let containers = ["#nav-breadcrumbs", "ul.navlinks", ".navlinks", "p.breadcrumbs", "td.nav, span.nav", "#breadcrumbs", "#navstrip"];
     for c in containers {
         for cont in root.select(&sel(c)) {
             for a in cont.select(&sel("a[href*='viewforum.php']")) {
@@ -525,6 +582,11 @@ fn parse_forum(root: ElementRef, url: &str, dir: &str) -> Option<ForumPage> {
             None
         });
         threads.push(ThreadSummary { id: tid, title: text_of(link), path: topic_path(dir, tid), author });
+    }
+    // "The forum you selected does not exist" and login walls: no name, no topics. Saving them
+    // would replace a board's real name from an older capture with nothing.
+    if forum.title.is_empty() && threads.is_empty() {
+        return None;
     }
     Some(ForumPage { forum, parents, page, total_pages, threads })
 }

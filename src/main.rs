@@ -136,6 +136,12 @@ enum WaybackCmd {
         #[arg(long)]
         only: Option<String>,
     },
+    /// Parse downloaded pages again from the raw folder (after a tool update), without
+    /// downloading anything. Needs the folder `fetch --raw-dir` saved them in.
+    Reparse {
+        #[arg(long)]
+        raw_dir: PathBuf,
+    },
     /// Show how many pages are pending, done, skipped or failed.
     Status,
 }
@@ -244,6 +250,16 @@ fn main() -> Result<()> {
                 }
             })?;
             println!("fetched: ok {}, skipped {}, errors {}", r.ok, r.skipped, r.errors);
+        }
+        Cmd::Wayback(WaybackCmd::Reparse { raw_dir }) => {
+            let mut store = Store::open(&cli.db)?;
+            let r = forumark::wayback::reparse(&mut store, &raw_dir, |r, total| {
+                let done = r.ok + r.skipped + r.errors + r.missing;
+                if done % 500 == 0 || done == total {
+                    eprintln!("{done}/{total} pages (ok {}, skipped {}, errors {}, no raw copy {})", r.ok, r.skipped, r.errors, r.missing);
+                }
+            })?;
+            println!("reparsed: ok {}, skipped {}, errors {}, no raw copy {}", r.ok, r.skipped, r.errors, r.missing);
         }
         Cmd::Wayback(WaybackCmd::Status) => {
             let store = Store::open(&cli.db)?;
