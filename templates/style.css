@@ -113,7 +113,7 @@ main { padding-bottom: 2rem; }
 }
 
 /* XenForo quote chrome kept in archived posts: the expand toggle does nothing here. */
-.post-body .bbCodeBlock-expandLink, .post-body .bbCodeBlock-shrinkLink { display: none; }
+.post-body .bbCodeBlock-expandLink, .post-body .bbCodeBlock-shrinkLink, .post-body .quoteExpand { display: none; }
 .post-body .embed-link { margin: .6rem 0; }
 .post-body .embed-link a { display: inline-block; padding: .45rem .8rem; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); text-decoration: none; }
 .post-body .embed-link a:hover { border-color: var(--accent); }
