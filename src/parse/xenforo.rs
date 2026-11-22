@@ -18,8 +18,24 @@ pub fn clean_text<'a>(parts: impl Iterator<Item = &'a str>) -> String {
     joined.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// The text a reader sees: skips what sits inside <script>, <style>, <template> and
+/// <noscript> (XenForo 2 puts a lightbox phrase list in a JSON <script> inside posts).
+pub fn visible_text(el: ElementRef) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for n in el.descendants() {
+        let Some(t) = n.value().as_text() else { continue };
+        let hidden = n.ancestors().take_while(|a| a.id() != el.id()).any(|a| {
+            a.value().as_element().is_some_and(|e| matches!(e.name(), "script" | "style" | "template" | "noscript"))
+        });
+        if !hidden {
+            parts.push(t);
+        }
+    }
+    clean_text(parts.into_iter())
+}
+
 fn text_of(el: ElementRef) -> String {
-    clean_text(el.text())
+    visible_text(el)
 }
 
 fn first<'a>(root: ElementRef<'a>, s: &str) -> Option<ElementRef<'a>> {
@@ -314,4 +330,19 @@ fn push_summary(out: &mut Vec<ThreadSummary>, id: i64, title: String, path: &str
     }
     let path = base_path(path, "threads").unwrap_or_else(|| path.to_string());
     out.push(ThreadSummary { id, title, path, author });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn visible_text_skips_scripts_and_styles() {
+        let doc = Html::parse_fragment(
+            r#"<div class="bbWrapper">Hello <script type="application/json">{"lightbox_close": "Close"}</script>
+               <style>.x{}</style><b>world</b><noscript>enable JS</noscript></div>"#,
+        );
+        let body = doc.select(&sel("div.bbWrapper")).next().unwrap();
+        assert_eq!(visible_text(body), "Hello world");
+    }
 }

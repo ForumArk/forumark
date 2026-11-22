@@ -14,7 +14,7 @@ use scraper::{ElementRef, Html, Selector};
 
 use crate::model::{Attachment, Forum, ForumPage, Page, Post, ThreadPage, ThreadSummary, User};
 use crate::parse::phpbb::parse_date;
-use crate::parse::xenforo::clean_text;
+use crate::parse::xenforo::visible_text;
 use crate::urls::{SmfLink, smf_link, smf_params, strip_wayback};
 
 fn sel(s: &str) -> Selector {
@@ -22,7 +22,7 @@ fn sel(s: &str) -> Selector {
 }
 
 fn text_of(el: ElementRef) -> String {
-    clean_text(el.text())
+    visible_text(el)
 }
 
 fn first<'a>(root: ElementRef<'a>, s: &str) -> Option<ElementRef<'a>> {

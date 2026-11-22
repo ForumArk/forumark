@@ -10,7 +10,7 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use scraper::{ElementRef, Html, Selector};
 
 use crate::model::{Attachment, Forum, ForumPage, Page, Post, ThreadPage, ThreadSummary, User};
-use crate::parse::xenforo::clean_text;
+use crate::parse::xenforo::visible_text;
 use crate::urls::{PhpbbLink, phpbb_link, query_params, script_dir, strip_wayback};
 
 fn sel(s: &str) -> Selector {
@@ -18,7 +18,7 @@ fn sel(s: &str) -> Selector {
 }
 
 fn text_of(el: ElementRef) -> String {
-    clean_text(el.text())
+    visible_text(el)
 }
 
 fn first<'a>(root: ElementRef<'a>, s: &str) -> Option<ElementRef<'a>> {
@@ -275,7 +275,7 @@ fn parse_posts_tables(root: ElementRef) -> Vec<Post> {
             }
         }
         let html = html.trim_end().trim_end_matches("<br>").trim_end_matches("<br />").to_string();
-        let text = clean_text(Html::parse_fragment(&html).root_element().text());
+        let text = visible_text(Html::parse_fragment(&html).root_element());
         posts.push(Post {
             id,
             author: User { id: author_id, name: if author_name.is_empty() { "Guest".into() } else { author_name } },

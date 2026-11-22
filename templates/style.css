@@ -150,4 +150,6 @@ main { padding-bottom: 2rem; }
 }
 #search .pagefind-ui__result-link { color: var(--accent); }
 #search .pagefind-ui__result-excerpt, #search .pagefind-ui__message { color: var(--text); }
+/* Long URLs in excerpts or titles must wrap, or phones get a sideways-scrolling page. */
+#search .pagefind-ui__result-excerpt, #search .pagefind-ui__result-link { overflow-wrap: anywhere; }
 #search mark { background: var(--accent-soft); color: var(--text); border-radius: 2px; padding: 0 1px; }
