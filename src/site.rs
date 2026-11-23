@@ -63,6 +63,10 @@ pub struct BuildOptions {
     pub see_also: Option<(String, String)>,
     /// Removal requests: content left out of the site (see `removals`).
     pub removals: Removals,
+    /// Name of the whole website, added to page titles and link previews.
+    pub site_name: Option<String>,
+    /// Absolute URL of the link-preview picture (og:image).
+    pub og_image: Option<String>,
 }
 
 /// A curated list of boards, shown as one A–Z page per board.
@@ -196,6 +200,8 @@ struct Site<'a> {
     project_url: &'static str,
     see_also_name: Option<&'a str>,
     see_also_url: Option<&'a str>,
+    site_name: Option<&'a str>,
+    og_image: Option<&'a str>,
 }
 
 #[derive(Serialize, Clone)]
@@ -370,6 +376,8 @@ impl<'a> Builder<'a> {
             project_url: crate::PROJECT_URL,
             see_also_name: self.opts.see_also.as_ref().map(|s| s.0.as_str()),
             see_also_url: self.opts.see_also.as_ref().map(|s| s.1.as_str()),
+            site_name: self.opts.site_name.as_deref(),
+            og_image: self.opts.og_image.as_deref(),
         }
     }
 
@@ -409,6 +417,20 @@ impl<'a> Builder<'a> {
         ForumLink { title: f.title.clone(), href: self.forum_href(f, 1), threads: self.subtree_thread_count(f.id) }
     }
 
+    /// The link-preview title: the page's `<title>` (already escaped) without the site name,
+    /// which previews show separately as og:site_name.
+    fn og_title(&self, html: &str) -> String {
+        let title = html
+            .split_once("<title>")
+            .and_then(|(_, rest)| rest.split_once("</title>"))
+            .map(|(t, _)| t)
+            .unwrap_or("");
+        match &self.opts.site_name {
+            Some(name) => title.strip_suffix(&format!(" · {}", escape_html(name))).unwrap_or(title).to_string(),
+            None => title.to_string(),
+        }
+    }
+
     fn render(&mut self, tpl: &str, rel_dir: &str, ctx: minijinja::Value, meta: PageMeta) -> Result<()> {
         let canonical = self.canonical(rel_dir);
         let page = context! {
@@ -417,7 +439,10 @@ impl<'a> Builder<'a> {
             canonical => canonical.clone(),
             jsonld => meta.jsonld.map(Value::from_safe_string),
         };
-        let html = self.env.get_template(tpl)?.render(context! { page => page, ..ctx })?;
+        let mut html = self.env.get_template(tpl)?.render(context! { page => page, ..ctx })?;
+        if html.contains("__OG_TITLE__") {
+            html = html.replacen("__OG_TITLE__", &self.og_title(&html), 1);
+        }
         write_page(&self.opts.out_dir, rel_dir, &html)?;
         self.report.pages += 1;
         if let (false, Some(url)) = (meta.noindex, canonical) {

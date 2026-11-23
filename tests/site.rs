@@ -35,6 +35,8 @@ fn options(out: &std::path::Path) -> BuildOptions {
         collections: vec![Collection::parse("plugins|Plugins & Scripts|12=MZ plugins,999").unwrap()],
         see_also: Some(("Other Archive".into(), "https://other.example/".into())),
         removals: Removals::default(),
+        site_name: Some("Forum Ark".into()),
+        og_image: Some("https://archive.example.org/assets/og.png".into()),
     }
 }
 
@@ -52,6 +54,15 @@ fn builds_site_with_local_links_and_missing_pages() {
     assert!(page2.contains(r#"href="/rm/members/777/""#));
     assert!(page2.contains(r#"href="/rm/threads/4242/page-3/""#));
     assert!(!page2.contains("My signature"));
+    // Site name in the title, link-preview tags without it in og:title.
+    let title = page2.split_once("<title>").unwrap().1.split_once("</title>").unwrap().0;
+    assert!(title.ends_with(" · Test Archive · Forum Ark"), "{title}");
+    let og = format!(r#"<meta property="og:title" content="{}">"#, title.trim_end_matches(" · Forum Ark"));
+    assert!(page2.contains(&og), "missing {og}");
+    assert!(page2.contains(r#"<meta property="og:site_name" content="Forum Ark">"#));
+    assert!(page2.contains(r#"<meta property="og:image" content="https://archive.example.org/assets/og.png">"#));
+    assert!(page2.contains(r#"<meta property="og:url" content="https://archive.example.org/rm/threads/4242/page-2/">"#));
+    assert!(!page2.contains("__OG_TITLE__"));
 
     let missing = std::fs::read_to_string(out.path().join("threads/4242/index.html")).unwrap();
     assert!(missing.contains("was not preserved"));

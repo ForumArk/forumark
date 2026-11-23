@@ -86,6 +86,14 @@ enum Cmd {
         /// "user 78", "anonymize 78" or a pasted archive link. Applied on every build.
         #[arg(long)]
         removals: Option<PathBuf>,
+        /// Name of the whole website the archive is part of, e.g. "Forum Ark". Added to every
+        /// page title ("Thread · Archive · Forum Ark") and to link previews (og:site_name).
+        #[arg(long)]
+        site_name: Option<String>,
+        /// Absolute address of a picture (1200×630 PNG) shown when a page is shared on
+        /// Discord, Reddit, WhatsApp, ... Needs --public-url.
+        #[arg(long)]
+        og_image: Option<String>,
     },
     /// Import from the Internet Archive's Wayback Machine.
     #[command(subcommand)]
@@ -178,7 +186,7 @@ fn main() -> Result<()> {
             }
             println!("imported {threads} thread page(s), {forums} forum page(s); skipped {skipped}");
         }
-        Cmd::Build { out, origin, title, base, contact, removal_url, privacy_url, about_url, notice, threads_per_page, no_search, search_chunk, public_url, collection, see_also, removals } => {
+        Cmd::Build { out, origin, title, base, contact, removal_url, privacy_url, about_url, notice, threads_per_page, no_search, search_chunk, public_url, collection, see_also, removals, site_name, og_image } => {
             let collections = collection.iter().map(|c| forumark::site::Collection::parse(c)).collect::<Result<Vec<_>>>()?;
             let store = Store::open(&cli.db)?;
             let opts = forumark::site::BuildOptions {
@@ -204,6 +212,8 @@ fn main() -> Result<()> {
                         _ => Err(anyhow::anyhow!("--see-also must look like \"Name|https://...\"")),
                     })
                     .transpose()?,
+                site_name,
+                og_image,
                 removals: match &removals {
                     Some(path) => {
                         let r = forumark::removals::Removals::load(path)?;
