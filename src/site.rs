@@ -32,6 +32,17 @@ use crate::removals::{Applied, Removals, hide_emails};
 use crate::sanitize::{KnownPages, LinkContext, clean_post_html, local_href};
 use crate::store::Store;
 
+/// Post text for descriptions and structured data. Databases made before 0.9.0 can hold
+/// text from <script>/<style> inside a post (XenForo 2's lightbox phrases); re-read those.
+fn post_text(body_html: &str, text: String) -> String {
+    let lower = body_html.to_ascii_lowercase();
+    if lower.contains("<script") || lower.contains("<style") {
+        crate::parse::xenforo::visible_text(scraper::Html::parse_fragment(body_html).root_element())
+    } else {
+        text
+    }
+}
+
 pub struct BuildOptions {
     pub out_dir: PathBuf,
     /// URL prefix the archive is served under; must start and end with `/`.
@@ -603,7 +614,7 @@ impl<'a> Builder<'a> {
             for (pid, page, author_id, author, posted_at, body, text) in rows {
                 // Email addresses people wrote in posts are hidden, and removed members' names
                 // are taken out of quotes.
-                let text = self.removals.scrub(&hide_emails(&text));
+                let text = self.removals.scrub(&hide_emails(&post_text(&body, text)));
                 let author = hide_emails(&author);
                 let body = self.removals.scrub(&hide_emails(&clean_post_html(&body, &self.links)));
                 text_by_page.entry(page).or_default().push((author.clone(), posted_at.clone(), text));
@@ -1060,5 +1071,17 @@ mod tests {
             .render_str("{{ t }}|<a href=\"{{ h }}\">", context! { t => "<script>x</script>", h => "/a/b?q=\"1\"" })
             .unwrap();
         assert_eq!(out, "&lt;script&gt;x&lt;/script&gt;|<a href=\"/a/b?q=&quot;1&quot;\">");
+    }
+}
+
+#[cfg(test)]
+mod post_text_tests {
+    use super::post_text;
+
+    #[test]
+    fn rereads_text_when_post_holds_a_script() {
+        let html = r#"<p>Hello <b>world</b></p><script type="application/json">{"lightbox_close":"Close"}</script>"#;
+        assert_eq!(post_text(html, "Hello world {\"lightbox_close\":\"Close\"}".into()), "Hello world");
+        assert_eq!(post_text("<p>Plain</p>", "kept as is".into()), "kept as is");
     }
 }
