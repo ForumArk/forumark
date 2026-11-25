@@ -78,13 +78,17 @@ pub fn parse(html: &str, url: &str) -> Result<Option<Page>> {
         return Ok(parse_forum(root, &path, url).map(Page::Forum));
     }
     // Fallback: decide by URL and content.
-    if path.contains("/threads/") && (first(root, "article.message--post").is_some() || first(root, "li.message").is_some()) {
+    if path.contains("/threads/") && (first(root, XF2_POST).is_some() || first(root, "li.message").is_some()) {
         return Ok(parse_thread(root, &path, url).map(Page::Thread));
     }
     Ok(None)
 }
 
 // ---------------------------------------------------------------- threads
+
+/// XenForo 2 posts. Some themes glue the first post's classes together
+/// (Space.com: "message-threadStarterPostmessage--post"), so also match by post id.
+const XF2_POST: &str = r#"article.message--post, article.js-post[data-content^="post-"]"#;
 
 fn parse_thread(root: ElementRef, path: &str, url: &str) -> Option<ThreadPage> {
     let thread_id = id_after(path, "threads").or_else(|| id_after(&normalize_path(url), "threads"))?;
@@ -98,7 +102,7 @@ fn parse_thread(root: ElementRef, path: &str, url: &str) -> Option<ThreadPage> {
     let forums = breadcrumbs(root);
 
     let mut posts = Vec::new();
-    for el in root.select(&sel("article.message--post")) {
+    for el in root.select(&sel(XF2_POST)) {
         if let Some(p) = parse_post_xf2(el) {
             posts.push(p);
         }
@@ -335,6 +339,23 @@ fn push_summary(out: &mut Vec<ThreadSummary>, id: i64, title: String, path: &str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_posts_with_glued_classes() {
+        // Space.com's theme writes "message-threadStarterPostmessage--post" on the first post.
+        let html = r#"<html><body><h1 class="p-title-value">Moon</h1>
+            <article class="message message-threadStarterPostmessage--post js-post" data-author="Admin" data-content="post-10">
+              <article class="message-body js-selectToQuote"><div class="bbWrapper">First</div></article></article>
+            <article class="message message--post js-post" data-author="Bea" data-content="post-11">
+              <article class="message-body js-selectToQuote"><div class="bbWrapper">Second</div></article></article>
+            </body></html>"#;
+        let Some(Page::Thread(t)) = parse(html, "https://forums.space.com/threads/moon.5/").unwrap() else {
+            panic!("not read as a thread")
+        };
+        let ids: Vec<i64> = t.posts.iter().map(|p| p.id).collect();
+        assert_eq!(ids, vec![10, 11]);
+        assert_eq!(t.posts[0].body_text, "First");
+    }
 
     #[test]
     fn visible_text_skips_scripts_and_styles() {
