@@ -119,3 +119,18 @@ fn phpbb3_table_theme_with_split_rows() {
     assert_eq!(g.posted_at.as_deref(), Some("2010-01-29T21:05:00"));
     assert_eq!(g.body_text, "Thanks, that helped.");
 }
+
+#[test]
+fn phpbb3_subsilver2_date_after_subject_and_profile_button_below() {
+    // Stock phpBB 3.0 subsilver2 (Box2D forum, 2007-2008): "Post subject: … Posted: <date>"
+    // in the header row; the profile link is a button in the row after the message.
+    let url = "http://board.example.org/forum/viewtopic.php?f=3&t=15";
+    let page = parse_page(&fixture("phpbb3_subsilver2_topic.html"), url, Software::Phpbb).unwrap().unwrap();
+    let Page::Thread(t) = page else { panic!("expected thread") };
+    assert_eq!(t.posts.len(), 1);
+    let p = &t.posts[0];
+    assert_eq!(p.id, 59);
+    assert_eq!((p.author.id, p.author.name.as_str()), (Some(76), "Kestrel"));
+    assert_eq!(p.posted_at.as_deref(), Some("2007-09-19T13:30:00"));
+    assert_eq!(p.body_text, "How do I limit a hinge?");
+}

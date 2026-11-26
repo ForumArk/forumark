@@ -254,11 +254,7 @@ fn parse_posts_tables(root: ElementRef) -> Vec<Post> {
         let posted_at = cells[1]
             .select(&sel(".postdetails, .postdate, div.gensmall, span.gensmall"))
             .map(text_of)
-            .find_map(|t| {
-                let t = t.split("Post subject").next().unwrap_or(&t).to_string();
-                let t = t.trim_start_matches("Posted:").trim_start_matches("Posted").trim();
-                parse_date(t)
-            });
+            .find_map(|t| date_in_header(&t));
 
         // phpBB 2 closes the body span around quotes and code boxes (they are tables),
         // so the message is the whole cell that holds the first body span.
@@ -328,17 +324,44 @@ fn parse_posts_split_rows(root: ElementRef) -> Vec<Post> {
             .filter(|u| !u.name.is_empty())
             .unwrap_or_else(|| User { id: None, name: "Guest".into() });
 
-        let posted_at = head.select(&sel("span.genmed, .postdetails, span.gensmall, td")).map(text_of).find_map(|t| {
-            let t = t.split("Post subject").next().unwrap_or(&t).to_string();
-            let t = t.trim_start_matches("Posted:").trim_start_matches("Posted").trim();
-            parse_date(t)
-        });
+        let posted_at = head.select(&sel("span.genmed, .postdetails, span.gensmall, td")).map(text_of).find_map(|t| date_in_header(&t));
+
+        // phpBB 3 subsilver2: no profile link in the header; the "Profile" button sits in the
+        // row after the message, next to "Top".
+        let author = if author.id.is_none() {
+            let button_row = body_row.next_siblings().filter_map(ElementRef::wrap).find(|e| e.value().name() == "tr");
+            match button_row.and_then(|r| {
+                r.select(&sel("a[href*='mode=viewprofile']")).find_map(|a| match href_link(a) {
+                    Some(PhpbbLink::Member { id }) => Some(id),
+                    _ => None,
+                })
+            }) {
+                Some(id) => User { id: Some(id), ..author },
+                None => author,
+            }
+        } else {
+            author
+        };
 
         let html = body.inner_html().trim().to_string();
         let text = text_of(body);
         posts.push(Post { id, author, posted_at, body_html: html, body_text: text, attachments: attachments(body_row) });
     }
     posts
+}
+
+/// The date in a post header: "Posted: <date>" (subsilver2 puts it after "Post subject: <title>"),
+/// or the header text before the subject (phpBB 2).
+fn date_in_header(t: &str) -> Option<String> {
+    if let Some(i) = t.find("Posted:") {
+        let after = &t[i + "Posted:".len()..];
+        let after = after.split("Post subject").next().unwrap_or(after);
+        if let Some(d) = parse_date(after.trim()) {
+            return Some(d);
+        }
+    }
+    let t = t.split("Post subject").next().unwrap_or(t);
+    parse_date(t.trim_start_matches("Posted:").trim_start_matches("Posted").trim())
 }
 
 fn attachments(el: ElementRef) -> Vec<Attachment> {
